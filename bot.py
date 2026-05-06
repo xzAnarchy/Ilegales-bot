@@ -1235,6 +1235,128 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
 
 # ===== Comandos de cupos extra =====
 
+@bot.tree.command(name="degradar", description="[Staff] Degrada a un Jefe a integrante (bypassea todas las restricciones)")
+@app_commands.describe(
+    usuario="Usuario al que degradar",
+    banda="Banda en la que degradarlo",
+)
+async def degradar_slash(interaction: discord.Interaction, usuario: discord.Member, banda: discord.Role):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+    if banda.id not in MEMBER_TO_LEADER_ROLE:
+        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        return
+
+    active = await get_active_membership(usuario.id, interaction.guild.id, role_kind="leader")
+    if not active or active["band_role_id"] != banda.id:
+        await interaction.response.send_message(format_message(
+            f"{usuario.mention} no es **Jefe** activo de {banda.mention}",
+        ), ephemeral=True)
+        return
+
+    leader_role_id = MEMBER_TO_LEADER_ROLE.get(banda.id)
+    leader_role = interaction.guild.get_role(leader_role_id) if leader_role_id else None
+
+    # Quitar rol de jefe y poner rol de miembro
+    try:
+        if leader_role and leader_role in usuario.roles:
+            await usuario.remove_roles(leader_role, reason=f"Degradado por staff {interaction.user}")
+        if banda not in usuario.roles:
+            await usuario.add_roles(banda, reason=f"Degradado a integrante por staff {interaction.user}")
+    except discord.Forbidden:
+        await interaction.response.send_message(format_message("No tengo permisos para gestionar los roles"), ephemeral=True)
+        return
+
+    # Cerrar membresía leader
+    await close_membership(active["id"])
+
+    # Abrir nueva membresía 'member' usando la fecha original (no consume cupo semanal)
+    last_member = await get_last_membership(usuario.id, interaction.guild.id, banda.id, role_kind="member")
+    if last_member:
+        original_joined = last_member["joined_at"]
+    else:
+        original_joined = active["joined_at"]
+    async with bot.db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO band_membership (guild_id, user_id, band_role_id, role_kind, joined_at) VALUES ($1, $2, $3, 'member', $4)",
+            interaction.guild.id, usuario.id, banda.id, original_joined,
+        )
+
+    leader_count = await count_active_leaders(interaction.guild.id, banda.id)
+    await interaction.response.send_message(format_message(
+        f"{usuario.mention} Ya no es Jefe de {banda.mention}, ha sido degradado a integrante",
+        f"Confirmado por {interaction.user.mention} (acción de staff)",
+        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND}",
+    ))
+
+
+@bot.tree.command(name="quitar_rango", description="[Staff] Expulsa totalmente a un usuario de una banda (bypassea todas las restricciones)")
+@app_commands.describe(
+    usuario="Usuario a expulsar",
+    banda="Banda de la que expulsarlo",
+    sin_cooldown="Si es True, no aplica cooldown al usuario (por defecto False, sí aplica)",
+)
+async def quitar_rango_slash(
+    interaction: discord.Interaction,
+    usuario: discord.Member,
+    banda: discord.Role,
+    sin_cooldown: bool = False,
+):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+    if banda.id not in MEMBER_TO_LEADER_ROLE:
+        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        return
+
+    active_member = await get_active_membership(usuario.id, interaction.guild.id, role_kind="member")
+    active_leader = await get_active_membership(usuario.id, interaction.guild.id, role_kind="leader")
+    is_member_here = active_member and active_member["band_role_id"] == banda.id
+    is_leader_here = active_leader and active_leader["band_role_id"] == banda.id
+
+    if not is_member_here and not is_leader_here:
+        await interaction.response.send_message(format_message(
+            f"{usuario.mention} no está activamente en {banda.mention}",
+        ), ephemeral=True)
+        return
+
+    # Quitar todos los roles de la banda en Discord
+    leader_role_id = MEMBER_TO_LEADER_ROLE.get(banda.id)
+    leader_role = interaction.guild.get_role(leader_role_id) if leader_role_id else None
+    roles_to_remove = []
+    if leader_role and leader_role in usuario.roles:
+        roles_to_remove.append(leader_role)
+    if banda in usuario.roles:
+        roles_to_remove.append(banda)
+    if roles_to_remove:
+        try:
+            await usuario.remove_roles(*roles_to_remove, reason=f"Expulsado por staff {interaction.user}")
+        except discord.Forbidden:
+            await interaction.response.send_message(format_message("No tengo permisos para remover los roles"), ephemeral=True)
+            return
+
+    # Si pide sin_cooldown, en vez de cerrar normalmente, borramos las filas para que no genere cooldown
+    if sin_cooldown:
+        async with bot.db_pool.acquire() as conn:
+            if is_leader_here:
+                await conn.execute("DELETE FROM band_membership WHERE id = $1", active_leader["id"])
+            if is_member_here:
+                await conn.execute("DELETE FROM band_membership WHERE id = $1", active_member["id"])
+    else:
+        if is_leader_here:
+            await close_membership(active_leader["id"])
+        if is_member_here:
+            await close_membership(active_member["id"])
+
+    cooldown_line = "Estado actual: Sin cooldown (acción de staff)" if sin_cooldown else "Estado actual: Se activó el cooldown"
+    await interaction.response.send_message(format_message(
+        f"{usuario.mention} Ha salido de {banda.mention}",
+        f"Confirmado por {interaction.user.mention} (acción de staff)",
+        cooldown_line,
+    ))
+
+
 @bot.tree.command(name="cupo_extra", description="[Staff] Añade cupos extra a una banda (permanentes o temporales)")
 @app_commands.describe(
     banda="La banda a la que añadir cupos",
