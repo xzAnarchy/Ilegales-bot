@@ -84,13 +84,6 @@ BANDS_CONFIG: list[dict] = [
          "owner_id":    1199435499824226534,
      },
      {
-         "name":        "La-Sub21",
-         "leader_role": 1211157133341757450,
-         "member_role": 1211157225146421289,
-         "capacity":    15,
-         "owner_id":    728800359518306314,
-     },
-     {
          "name":        "Faze",
          "leader_role": 1213885972148658226,
          "member_role": 1213885841223712818,
