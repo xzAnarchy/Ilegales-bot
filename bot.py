@@ -87,7 +87,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "Faze",
          "leader_role": 1213885972148658226,
          "member_role": 1213885841223712818,
-         "capacity":    12,
+         "capacity":    15,
          "owner_id":    702329561622249535,
      },
      {
