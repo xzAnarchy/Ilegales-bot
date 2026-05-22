@@ -143,7 +143,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "Legends Never Die",
          "leader_role": 1407916113685381262,
          "member_role": 1407916043132993567,
-         "capacity":    12,
+         "capacity":    15,
          "owner_id":    700171212654903396,
      },
      {
