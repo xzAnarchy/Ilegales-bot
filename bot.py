@@ -119,11 +119,11 @@ BANDS_CONFIG: list[dict] = [
          "owner_id":    1275573986314686575,
      },
      {
-         "name":        "The Monkeys",
-         "leader_role": 1283249693412954126,
-         "member_role": 1283249702959058956,
-         "capacity":    15,
-         "owner_id":    1304140223076368435,
+         "name":        "Dont trust strangers",
+         "leader_role": 1330669573242097786,
+         "member_role": 1330669301631291433,
+         "capacity":    12,
+         "owner_id":    470249013455749140,
      },
      {
          "name":        "Underblood",
