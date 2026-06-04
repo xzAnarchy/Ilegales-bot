@@ -828,16 +828,17 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader):
         await channel.send(format_message(f"Rol de **Jefe** (ID {leader_role_id}) no encontrado"))
         return
 
-    # Cerrar la membresía de tipo 'member' (si existe) — los jefes no son miembros
+    # Cerrar la membresía de tipo 'member' (si existe) en BD
+    # NOTA: NO quitamos el rol de miembro en Discord — los jefes tienen AMBOS roles (jefe + miembro)
     active_member = await get_active_membership(member.id, channel.guild.id, role_kind="member")
     if active_member and active_member["band_role_id"] == band_role.id:
         await close_membership(active_member["id"])
 
-    # Quitar el rol de miembro y agregar el de jefe en Discord
+    # Agregar rol de jefe y asegurar que tenga el de miembro también
     try:
-        if band_role in member.roles:
-            await member.remove_roles(band_role, reason=f"Ascendido a jefe por {leader}")
         await member.add_roles(leader_role, reason=f"Jefe asignado por {reactor} (solicitó: {leader})")
+        if band_role not in member.roles:
+            await member.add_roles(band_role, reason="Rol de miembro asegurado al ascender a Jefe")
     except discord.Forbidden:
         await channel.send(format_message("No tengo permisos para gestionar los roles"))
         return
@@ -931,12 +932,13 @@ async def handle_demote(channel, member, band_role, reactor, leader):
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(band_role.id)
     leader_role = channel.guild.get_role(leader_role_id) if leader_role_id else None
 
-    # Quitar rol de jefe y poner rol de miembro
+    # Solo quitar rol de jefe (mantiene el de miembro que ya tenía)
+    # Si por algún caso especial no tiene el de miembro, se lo aseguramos
     try:
         if leader_role and leader_role in member.roles:
             await member.remove_roles(leader_role, reason=f"Degradado por {reactor} (solicitó: {leader})")
         if band_role not in member.roles:
-            await member.add_roles(band_role, reason=f"Degradado a integrante por {leader}")
+            await member.add_roles(band_role, reason="Rol de miembro asegurado al degradar")
     except discord.Forbidden:
         await channel.send(format_message("No tengo permisos para gestionar los roles"))
         return
@@ -1265,12 +1267,12 @@ async def degradar_slash(interaction: discord.Interaction, usuario: discord.Memb
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(banda.id)
     leader_role = interaction.guild.get_role(leader_role_id) if leader_role_id else None
 
-    # Quitar rol de jefe y poner rol de miembro
+    # Solo quitar rol de jefe (mantiene el de miembro), asegurar miembro si por alguna razón no lo tiene
     try:
         if leader_role and leader_role in usuario.roles:
             await usuario.remove_roles(leader_role, reason=f"Degradado por staff {interaction.user}")
         if banda not in usuario.roles:
-            await usuario.add_roles(banda, reason=f"Degradado a integrante por staff {interaction.user}")
+            await usuario.add_roles(banda, reason=f"Rol de miembro asegurado al degradar por staff {interaction.user}")
     except discord.Forbidden:
         await interaction.response.send_message(format_message("No tengo permisos para gestionar los roles"), ephemeral=True)
         return
