@@ -126,11 +126,11 @@ BANDS_CONFIG: list[dict] = [
          "owner_id":    470249013455749140,
      },
      {
-         "name":        "Underblood",
+         "name":        "RG4",
          "leader_role": 1283255788139184188,
          "member_role": 1283255795122831410,
-         "capacity":    15,
-         "owner_id":    1006279091563008092,
+         "capacity":    12,
+         "owner_id":    559042930132779025,
      },
      {
          "name":        "C´est La Mort",
