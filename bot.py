@@ -150,7 +150,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "Spt",
          "leader_role": 1276961456642064384,
          "member_role": 1276961557124747398,
-         "capacity":    14,
+         "capacity":    17,
          "owner_id":    1155673440808865843,
      },
      {
