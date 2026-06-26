@@ -80,7 +80,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "K9",
          "leader_role": 1209199793730232360,
          "member_role": 1209199543904894986,
-         "capacity":    14,
+         "capacity":    17,
          "owner_id":    1199435499824226534,
      },
      {
