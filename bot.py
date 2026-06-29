@@ -122,7 +122,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "Dont trust strangers",
          "leader_role": 1330669573242097786,
          "member_role": 1330669301631291433,
-         "capacity":    14,
+         "capacity":    17,
          "owner_id":    470249013455749140,
      },
      {
