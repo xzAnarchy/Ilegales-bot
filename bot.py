@@ -694,14 +694,21 @@ async def on_ready():
         log.info(f"  - {b['name']}: capacidad {b['capacity']}, dueño: {owner}")
 
     # Sincronizar slash commands con el guild (instantáneo, no global)
-    if GUILD_ID:
-        guild = discord.Object(id=GUILD_ID)
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        log.info(f"✅ Sincronizados {len(synced)} slash commands en el guild {GUILD_ID}")
-    else:
-        synced = await bot.tree.sync()
-        log.info(f"✅ Sincronizados {len(synced)} slash commands globalmente (puede tardar hasta 1h)")
+    # Envuelto en try/except para que un error de sync NO crashee el bot
+    # (evita que Railway lo reinicie en bucle y nos rate-limiteen)
+    try:
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            log.info(f"✅ Sincronizados {len(synced)} slash commands en el guild {GUILD_ID}")
+        else:
+            synced = await bot.tree.sync()
+            log.info(f"✅ Sincronizados {len(synced)} slash commands globalmente (puede tardar hasta 1h)")
+    except discord.HTTPException as e:
+        log.error(f"⚠️ Error al sincronizar slash commands: {e}. El bot seguirá funcionando.")
+    except Exception as e:
+        log.error(f"⚠️ Error inesperado al sincronizar: {e}")
 
 
 @bot.event
