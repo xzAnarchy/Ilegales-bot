@@ -563,7 +563,7 @@ async def get_all_user_mentions(message: discord.Message, include_left: bool = T
         if not include_left:
             continue
         try:
-            user = await message.guild._state.fetch_user(user_id)
+            user = await bot.fetch_user(user_id)
             if not user.bot:
                 users.append(user)
         except (discord.NotFound, discord.HTTPException):
