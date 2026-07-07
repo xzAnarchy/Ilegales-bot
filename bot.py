@@ -529,21 +529,67 @@ def is_staff(member: discord.Member) -> bool:
     return bool({r.id for r in member.roles} & STAFF_ROLE_IDS)
 
 
-def get_all_user_mentions(message: discord.Message, include_left: bool = True) -> list[discord.abc.User]:
+MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
+
+
+async def get_all_user_mentions(message: discord.Message, include_left: bool = True) -> list[discord.abc.User]:
     """Devuelve TODOS los usuarios mencionados (no bots), preservando el orden y sin duplicados.
-    Si include_left=True, incluye usuarios que ya se salieron del servidor (como User en vez de Member)."""
+    Parsea el contenido crudo del mensaje para incluir usuarios que ya salieron del servidor,
+    ya que message.mentions solo trae los que aún están en el guild."""
     seen = set()
     users = []
-    for user in message.mentions:
-        if user.bot or user.id in seen:
+
+    # Extraer todos los IDs mencionados del contenido crudo (formato <@ID> o <@!ID>)
+    mentioned_ids = []
+    for match in MENTION_PATTERN.finditer(message.content):
+        try:
+            mentioned_ids.append(int(match.group(1)))
+        except ValueError:
             continue
-        member = message.guild.get_member(user.id)
-        seen.add(user.id)
+
+    for user_id in mentioned_ids:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+
+        # Intentar obtenerlo como miembro del servidor primero
+        member = message.guild.get_member(user_id)
         if member:
-            users.append(member)
-        elif include_left:
-            users.append(user)
+            if not member.bot:
+                users.append(member)
+            continue
+
+        # No está en el servidor. Intentar obtenerlo como usuario global.
+        if not include_left:
+            continue
+        try:
+            user = await message.guild._state.fetch_user(user_id)
+            if not user.bot:
+                users.append(user)
+        except (discord.NotFound, discord.HTTPException):
+            # Si Discord no lo encuentra, creamos un objeto "fantasma" solo con el ID
+            # para que el resto de la lógica pueda funcionar (BD, mensajes con mention)
+            fake_user = _make_ghost_user(user_id)
+            users.append(fake_user)
+
     return users
+
+
+class _GhostUser:
+    """Objeto mínimo que simula un User cuando Discord no puede resolver el ID."""
+    def __init__(self, user_id: int):
+        self.id = user_id
+        self.bot = False
+        self.mention = f"<@{user_id}>"
+        self.display_name = f"Usuario {user_id}"
+        self.name = self.display_name
+
+    def __str__(self):
+        return self.display_name
+
+
+def _make_ghost_user(user_id: int) -> _GhostUser:
+    return _GhostUser(user_id)
 
 
 def is_leader_request(message: discord.Message) -> bool:
@@ -756,7 +802,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         await channel.send(format_message(f"Rol de banda no encontrado (ID {band_member_role_id})"))
         return
 
-    targets = get_all_user_mentions(message)
+    targets = await get_all_user_mentions(message)
     if not targets:
         await channel.send(format_message(
             f"{reactor.mention} No se encontró ninguna mención de usuario en el mensaje"
