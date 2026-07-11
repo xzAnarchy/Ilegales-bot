@@ -1,44 +1,64 @@
 # Bot de Bandas — Discord
 
-Bot para gestionar roles de bandas en un servidor de roleplay con sistema de cooldowns, límites semanales, jerarquía dueño/jefe/miembro, y desmantelación de bandas.
+Bot para gestionar roles de bandas en un servidor de roleplay con sistema de cooldowns, límites semanales, jerarquía dueño/jefe/miembro, cupos extras, desmantelación de bandas y conteo de actos delictivos.
 
 ---
 
 ## 📋 Cómo funciona
 
-### Asignación y remoción de roles (por reacción)
+### Asignación y remoción por reacción
 
 Hay **dos canales separados**:
 
 #### 📥 Canal de SOLICITAR rango
 
-1. Un **jefe** de una banda escribe un mensaje mencionando al usuario:
+1. Un **jefe** escribe un mensaje mencionando al usuario:
    > `Solicito rango a @JuanPerez`
 2. Un **admin/staff** reacciona con ✅ al mensaje.
 3. El bot identifica la banda según el rol de jefe del autor, verifica todas las reglas y asigna el rol.
 
 #### 📤 Canal de QUITAR rango
 
-1. El jefe escribe:
-   > `Quito rango a @JuanPerez`
+1. El jefe escribe uno de los formatos según lo que quiera hacer.
 2. Un admin/staff reacciona con ✅.
-3. El bot remueve el rol y registra la salida (inicia el cooldown).
+3. El bot procesa la acción correspondiente.
 
-### Palabras clave especiales en el mensaje
+### Palabras clave en el mensaje
 
 El bot lee el contenido del mensaje del jefe para detectar:
 
-| Palabra           | Efecto                                                                |
-| ----------------- | --------------------------------------------------------------------- |
-| `jefe`            | Procesa la acción como solicitud/remoción de **jefe** (no de miembro) |
-| `cooldown` o `cd` | Salta los cooldowns de 4 y 5 días al asignar miembro                  |
+| Palabra                            | Canal     | Efecto                                                      |
+| ---------------------------------- | --------- | ----------------------------------------------------------- |
+| `jefe`                             | Solicitar | Solicita rol de **Jefe** (solo el dueño puede)              |
+| `jefe`                             | Quitar    | **Degrada** de Jefe a integrante                            |
+| `degradar`, `bajar`, `degradación` | Quitar    | **Degrada** de Jefe a integrante                            |
+| `cooldown`, `cd`                   | Solicitar | Salta los cooldowns de 4 y 5 días al asignar miembro        |
+| (ninguna palabra especial)         | Solicitar | Asigna como **miembro**                                     |
+| (ninguna palabra especial)         | Quitar    | **Expulsión total** (quita jefe y miembro, aplica cooldown) |
 
-Ejemplos:
+### Ejemplos
 
-- `Solicito rango a @user` → asigna miembro
-- `Solicito jefe a @user` → asigna jefe (solo el dueño puede)
+- `Solicito rango a @user` → asigna como miembro
+- `Solicito jefe a @user` → asciende a Jefe (solo el dueño puede)
 - `Solicito rango a @user cd` → asigna miembro saltándose los cooldowns
-- `Quito jefe a @user` → quita rol de jefe (solo el dueño puede)
+- `Quito rango a @user` → expulsión total (con cooldown)
+- `Quito jefe a @user` → degrada de Jefe a miembro
+- `Degradar a @user` → degrada de Jefe a miembro
+
+### Menciones múltiples
+
+Se pueden mencionar varios usuarios en el mismo mensaje. El bot los procesa uno por uno:
+
+> `Solicito rango a @Juan @Pedro @Maria`
+
+Cada uno se valida independientemente. Si a alguno le falta un cooldown, los demás siguen procesándose.
+
+### Usuarios que salieron del servidor
+
+Si un usuario se salió del servidor y quieren quitarle el rango:
+
+- ✅ En **quitar** rango: el bot lo procesa igualmente (cierra membresías, aplica cooldown en BD)
+- ❌ En **solicitar** rango: el bot rechaza con un mensaje claro ("No está en el servidor")
 
 ---
 
@@ -52,8 +72,8 @@ Ejemplos:
 | Cooldown desmantelación | 7 días para CUALQUIER banda         | No               |
 | Cooldown misma banda    | 4 días desde la salida              | Sí               |
 | Cooldown otra banda     | 5 días desde la salida              | Sí               |
-| Límite semanal          | Máx. 5 nuevos miembros/banda/semana | No               |
-| Capacidad de banda      | 12 o 15 según configuración         | No               |
+| Límite semanal          | Máx. 7 nuevos miembros/banda/semana | No               |
+| Capacidad de banda      | Configurable + cupos extras         | No               |
 
 ### Para asignar JEFE
 
@@ -64,11 +84,19 @@ Ejemplos:
 | Máximo de jefes activos       | 3 por banda                                     |
 | No puede ser jefe de 2 bandas | Una sola jefatura activa por persona            |
 
+### Comportamiento de roles
+
+- Los **Jefes tienen AMBOS roles** en Discord: jefe + miembro
+- Al **ascender** de miembro a Jefe: agrega rol de Jefe, mantiene rol de miembro
+- Al **degradar** de Jefe a miembro: quita rol de Jefe, mantiene rol de miembro. **No consume cupo semanal**
+- Al **expulsar totalmente**: quita ambos roles, aplica cooldown normal
+
 ### Protecciones del dueño
 
-- No se le puede quitar el rol de miembro
-- No se le puede quitar el rol de jefe
+- No se le puede quitar el rol de miembro (por reacción)
+- No se le puede quitar el rol de Jefe (por reacción)
 - Solo es removido en caso de desmantelación
+- **Excepción**: los comandos de staff `/degradar` y `/quitar_rango` bypassean estas protecciones
 
 ---
 
@@ -76,19 +104,52 @@ Ejemplos:
 
 Escribe `/` en cualquier canal donde el bot tenga acceso para ver el menú con autocompletado.
 
-| Comando                                             | Quién      | Descripción                                                           |
-| --------------------------------------------------- | ---------- | --------------------------------------------------------------------- |
-| `/estado [usuario]`                                 | Cualquiera | Banda actual, última banda y cooldowns activos                        |
-| `/banda [banda]`                                    | Cualquiera | Cupo, jefes activos, dueño y nuevos miembros de la semana             |
-| `/registrar_miembro [usuario] [banda] [días_atrás]` | Staff      | Registra manualmente a un miembro existente                           |
-| `/registrar_jefe [usuario] [banda] [días_atrás]`    | Staff      | Registra manualmente a un jefe existente (útil para el dueño inicial) |
-| `/desmantelacion [banda]`                           | Staff      | Expulsa a todos y aplica cooldown de 7 días                           |
+### Comandos generales
 
-### Sobre `/desmantelacion`
+| Comando                         | Quién      | Descripción                                                               |
+| ------------------------------- | ---------- | ------------------------------------------------------------------------- |
+| `/estado [usuario]`             | Cualquiera | Banda actual, última banda y cooldowns activos                            |
+| `/banda [banda]`                | Cualquiera | Cupo (base + extras), Jefes activos, dueño y nuevos miembros de la semana |
+| `/cupos_extras_lista [banda]`   | Cualquiera | Lista los cupos extras activos de una banda                               |
+| `/contar_actos [desde] [canal]` | Cualquiera | Cuenta actos delictivos en un canal desde una fecha                       |
 
-Sale un botón rojo de confirmación que solo quien ejecutó el comando puede pulsar (timeout 30 s). Si confirma:
+### Comandos de staff
 
-- Cierra todas las membresías activas (miembros + jefes) en la BD
+| Comando                                             | Descripción                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------------- |
+| `/registrar_miembro [usuario] [banda] [días_atrás]` | Registra manualmente a un miembro existente                           |
+| `/registrar_jefe [usuario] [banda] [días_atrás]`    | Registra manualmente a un Jefe existente (útil para el dueño inicial) |
+| `/degradar [usuario] [banda]`                       | Degrada a un Jefe a integrante (bypassea protecciones)                |
+| `/quitar_rango [usuario] [banda] [sin_cooldown]`    | Expulsa totalmente de una banda (bypassea protecciones)               |
+| `/cupo_extra [banda] [cantidad] [dias] [nota]`      | Añade cupos extras (permanentes o temporales)                         |
+| `/cupo_extra_quitar [extra_id]`                     | Elimina un cupo extra por su ID                                       |
+| `/desmantelacion [banda]`                           | Desmantela una banda: expulsa a todos + cooldown de 7 días            |
+
+### Cupos extras
+
+Los cupos extras son cupos adicionales que se pueden dar a una banda por encima de su capacidad base:
+
+- **Permanentes**: `/cupo_extra banda:@LosLobos cantidad:3`
+- **Temporales**: `/cupo_extra banda:@LosLobos cantidad:5 dias:7`
+- **Reducir**: `/cupo_extra banda:@LosLobos cantidad:-2`
+- **Con nota**: `/cupo_extra banda:@LosLobos cantidad:3 dias:14 nota:Por evento`
+
+Los cupos extras temporales expiran automáticamente. Se pueden acumular (varios extras se suman).
+
+### Conteo de actos delictivos
+
+`/contar_actos desde:2026-04-01 canal:#reportes-bandas`
+
+Lee mensajes del canal (o el actual si no se especifica) que contengan la frase **"acto delictivo"** y los cuenta:
+
+- Si contiene `fleeca`, `flecca` o `fleecca`: **0.5 puntos**
+- Cualquier otro tipo: **1.0 punto**
+
+### Comando `/desmantelacion`
+
+Muestra un botón rojo de confirmación (timeout 30 s). Si se confirma:
+
+- Cierra todas las membresías activas (miembros + Jefes) en la BD
 - Quita los roles de Discord
 - Aplica un cooldown de 7 días que bloquea unirse a CUALQUIER banda
 - Esto incluye al dueño
@@ -110,9 +171,9 @@ Opciones:
 - **Local**: instalar PostgreSQL y crear una BD vacía con `createdb banda_bot`
 - **Cloud (recomendado)**: crear cuenta gratis en [Neon](https://neon.tech) y copiar la connection string
 
-El bot crea las tablas automáticamente al iniciar.
+El bot crea todas las tablas automáticamente al iniciar.
 
-### 3. Configurar variables de entorno
+### 3. Configurar `.env`
 
 Copia `.env.example` a `.env` y completa los valores:
 
@@ -136,7 +197,7 @@ Edita las constantes al inicio del archivo:
 BANDS_CONFIG = [
     {
         "name":        "Los Lobos",
-        "leader_role": 111111111111111111,  # ID del rol de jefe
+        "leader_role": 111111111111111111,  # ID del rol de Jefe
         "member_role": 222222222222222222,  # ID del rol de miembro
         "capacity":    15,                  # Máx. personas activas (jefes + miembros)
         "owner_id":    777777777777777777,  # ID del usuario dueño
@@ -175,7 +236,7 @@ Si todo está bien, en los logs verás:
 ```
 [INFO] Bot conectado como TuBot#1234
 [INFO] Bandas configuradas: N
-[INFO] ✅ Sincronizados 5 slash commands en el guild ...
+[INFO] ✅ Sincronizados X slash commands en el guild ...
 ```
 
 ---
@@ -214,6 +275,16 @@ Para que el bot esté siempre online:
 
 ⚠️ La URL de Neon debe terminar en `?sslmode=require`. El bot lo maneja automáticamente.
 
+### ⚠️ Sobre rate limits de Discord
+
+Si Railway reinicia el bot muchas veces seguidas (por un crash en bucle), Discord puede rate-limitear tu IP con un error 429 de Cloudflare. Si esto pasa:
+
+1. **Detén el bot en Railway** inmediatamente
+2. Espera al menos 1 hora
+3. Solo entonces vuelve a arrancarlo
+
+El código actual maneja errores de sincronización sin crashear para prevenir este problema.
+
 ---
 
 ## 🗄️ Esquema de la base de datos
@@ -235,6 +306,17 @@ disbandment_cooldown (
     user_id     BIGINT,
     expires_at  TIMESTAMPTZ,
     reason      TEXT
+);
+
+extra_capacity (
+    id           BIGSERIAL PRIMARY KEY,
+    guild_id     BIGINT,
+    band_role_id BIGINT,
+    amount       INTEGER,
+    expires_at   TIMESTAMPTZ,       -- NULL = permanente
+    granted_by   BIGINT,
+    granted_at   TIMESTAMPTZ DEFAULT NOW(),
+    note         TEXT
 );
 ```
 
@@ -261,10 +343,33 @@ Las constantes al inicio de `bot.py` son fácilmente modificables:
 COOLDOWN_OTHER_BAND_DAYS = 5         # Días para unirse a otra banda
 COOLDOWN_SAME_BAND_DAYS = 4          # Días para volver a la misma
 DISBANDMENT_COOLDOWN_DAYS = 7        # Días tras desmantelación
-WEEKLY_MEMBER_LIMIT = 5              # Máx. miembros nuevos/semana/banda
-MAX_LEADERS_PER_BAND = 3             # Máx. jefes activos por banda
-MIN_DAYS_AS_MEMBER_FOR_LEADER = 15   # Días seguidos como miembro para ser jefe
+WEEKLY_MEMBER_LIMIT = 7              # Máx. miembros nuevos/semana/banda
+MAX_LEADERS_PER_BAND = 3             # Máx. Jefes activos por banda
+MIN_DAYS_AS_MEMBER_FOR_LEADER = 15   # Días seguidos como miembro para ser Jefe
 
-LEADER_KEYWORD = "jefe"              # Palabra que activa solicitud de jefe
-BYPASS_COOLDOWN_KEYWORDS = {"cooldown", "cd"}  # Palabras que saltan cooldowns
+LEADER_KEYWORD = "jefe"                                   # Palabra que activa solicitud/degradación de Jefe
+BYPASS_COOLDOWN_KEYWORDS = {"cooldown", "cd"}             # Palabras que saltan cooldowns
+DEMOTE_KEYWORDS = {"degradar", "degradación",
+                   "degradacion", "bajar"}                # Palabras que activan degradación
+```
+
+## 📝 Formato de los mensajes
+
+Todos los mensajes del bot siguen este formato uniforme:
+
+```
+- Mensaje principal
+- Solicitado por @quien
+- Confirmado por @staff
+- Estado actual: información relevante
+-------------------------------------------------
+```
+
+Los errores siguen un formato similar pero con "Motivo" en lugar de "Solicitado/Confirmado por":
+
+```
+- @usuario No puedes ingresar a esta OD
+- Motivo: razón específica
+- Estado actual: información
+-------------------------------------------------
 ```
