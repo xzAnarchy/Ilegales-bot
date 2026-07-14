@@ -136,7 +136,7 @@ BANDS_CONFIG: list[dict] = [
          "name":        "C´est La Mort",
          "leader_role": 1355029136783179786,
          "member_role": 1355028215000858624,
-         "capacity":    14,
+         "capacity":    17,
          "owner_id":    1345387913260568637,
      },
      {
