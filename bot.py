@@ -862,12 +862,16 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="member")
     weekly = await count_weekly_member_assignments(channel.guild.id, band_role.id)
+    total = await count_active_total_in_band(channel.guild.id, band_role.id)
+    capacity = BAND_CAPACITY.get(band_role.id, 0)
+    extra = await get_extra_capacity(channel.guild.id, band_role.id)
+    effective_capacity = capacity + extra
     bypass_note = " (Cooldowns saltados)" if bypass else ""
     await channel.send(format_message(
         f"{member.mention} Ahora es el nuevo integrante de {band_role.mention}{bypass_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
-        f"Estado actual: Cupo Semanal {weekly}/{WEEKLY_MEMBER_LIMIT}",
+        f"Estado actual: Cupo Semanal {weekly}/{WEEKLY_MEMBER_LIMIT} · Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -916,11 +920,15 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader):
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="leader")
     leader_count = await count_active_leaders(channel.guild.id, band_role.id)
+    total = await count_active_total_in_band(channel.guild.id, band_role.id)
+    capacity = BAND_CAPACITY.get(band_role.id, 0)
+    extra = await get_extra_capacity(channel.guild.id, band_role.id)
+    effective_capacity = capacity + extra
     await channel.send(format_message(
         f"{member.mention} Ha sido ascendido a Jefe de {band_role.mention}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
-        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND}",
+        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -978,11 +986,15 @@ async def handle_remove_full(channel, member, band_role, reactor, leader):
     if is_member_here:
         await close_membership(active_member["id"])
 
+    total = await count_active_total_in_band(channel.guild.id, band_role.id)
+    capacity = BAND_CAPACITY.get(band_role.id, 0)
+    extra = await get_extra_capacity(channel.guild.id, band_role.id)
+    effective_capacity = capacity + extra
     await channel.send(format_message(
         f"{member.mention} Ha salido de {band_role.mention}{left_server_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
-        "Estado actual: Se activó el cooldown",
+        f"Estado actual: Se activó el cooldown · Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -1049,11 +1061,15 @@ async def handle_demote(channel, member, band_role, reactor, leader):
         )
 
     leader_count = await count_active_leaders(channel.guild.id, band_role.id)
+    total = await count_active_total_in_band(channel.guild.id, band_role.id)
+    capacity = BAND_CAPACITY.get(band_role.id, 0)
+    extra = await get_extra_capacity(channel.guild.id, band_role.id)
+    effective_capacity = capacity + extra
     await channel.send(format_message(
         f"{member.mention} Ya no es Jefe de {band_role.mention}, ha sido degradado a integrante{left_server_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
-        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND}",
+        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -1378,10 +1394,14 @@ async def degradar_slash(interaction: discord.Interaction, usuario: discord.Memb
         )
 
     leader_count = await count_active_leaders(interaction.guild.id, banda.id)
+    total = await count_active_total_in_band(interaction.guild.id, banda.id)
+    capacity = BAND_CAPACITY.get(banda.id, 0)
+    extra = await get_extra_capacity(interaction.guild.id, banda.id)
+    effective_capacity = capacity + extra
     await interaction.response.send_message(format_message(
         f"{usuario.mention} Ya no es Jefe de {banda.mention}, ha sido degradado a integrante",
         f"Confirmado por {interaction.user.mention} (acción de staff)",
-        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND}",
+        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -1443,11 +1463,15 @@ async def quitar_rango_slash(
         if is_member_here:
             await close_membership(active_member["id"])
 
-    cooldown_line = "Estado actual: Sin cooldown (acción de staff)" if sin_cooldown else "Estado actual: Se activó el cooldown"
+    total = await count_active_total_in_band(interaction.guild.id, banda.id)
+    capacity = BAND_CAPACITY.get(banda.id, 0)
+    extra = await get_extra_capacity(interaction.guild.id, banda.id)
+    effective_capacity = capacity + extra
+    cooldown_line = "Sin cooldown (acción de staff)" if sin_cooldown else "Se activó el cooldown"
     await interaction.response.send_message(format_message(
         f"{usuario.mention} Ha salido de {banda.mention}",
         f"Confirmado por {interaction.user.mention} (acción de staff)",
-        cooldown_line,
+        f"Estado actual: {cooldown_line} · Integrantes {total}/{effective_capacity}",
     ))
 
 
