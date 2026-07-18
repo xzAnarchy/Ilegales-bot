@@ -105,11 +105,11 @@ BANDS_CONFIG: list[dict] = [
          "owner_id":    753750899158941726,
      },
      {
-         "name":        "Barrio Chino",
+         "name":        "Black Vipers",
          "leader_role": 1266240280580063256,
          "member_role": 1266240330764910622,
          "capacity":    17,
-         "owner_id":    1213250777598918842,
+         "owner_id":    704694925144621117,
      },
      {
          "name":        "Enigma Crew",
