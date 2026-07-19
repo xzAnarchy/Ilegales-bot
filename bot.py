@@ -1184,10 +1184,15 @@ async def registrar_miembro_slash(
             await interaction.response.send_message(format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
             return
 
+    total = await count_active_total_in_band(interaction.guild.id, banda.id)
+    capacity = BAND_CAPACITY.get(banda.id, 0)
+    extra = await get_extra_capacity(interaction.guild.id, banda.id)
+    effective_capacity = capacity + extra
     await interaction.response.send_message(format_message(
         f"{usuario.mention} registrado como **miembro** de {banda.mention}",
         f"Fecha de entrada: hace {dias_atras} días",
         f"Confirmado por: {interaction.user.mention}",
+        f"Estado actual: Integrantes {total}/{effective_capacity}",
     ))
 
 
@@ -1236,10 +1241,16 @@ async def registrar_jefe_slash(
             await interaction.response.send_message(format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
             return
 
+    leader_count = await count_active_leaders(interaction.guild.id, banda.id)
+    total = await count_active_total_in_band(interaction.guild.id, banda.id)
+    capacity = BAND_CAPACITY.get(banda.id, 0)
+    extra = await get_extra_capacity(interaction.guild.id, banda.id)
+    effective_capacity = capacity + extra
     await interaction.response.send_message(format_message(
         f"{usuario.mention} registrado como **Jefe** de {banda.mention}",
         f"Fecha de entrada: hace {dias_atras} días",
         f"Confirmado por: {interaction.user.mention}",
+        f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
 
 
