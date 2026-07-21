@@ -108,14 +108,14 @@ BANDS_CONFIG: list[dict] = [
          "name":        "Black Vipers",
          "leader_role": 1266240280580063256,
          "member_role": 1266240330764910622,
-         "capacity":    17,
+         "capacity":    14,
          "owner_id":    704694925144621117,
      },
      {
          "name":        "Enigma Crew",
          "leader_role": 1281111966827679836,
          "member_role": 1281112212160774235,
-         "capacity":    14,
+         "capacity":    17,
          "owner_id":    1275573986314686575,
      },
      {
