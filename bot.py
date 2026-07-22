@@ -265,6 +265,25 @@ CREATE TABLE IF NOT EXISTS extra_capacity (
 
 CREATE INDEX IF NOT EXISTS idx_extra_capacity_band
     ON extra_capacity (guild_id, band_role_id);
+
+-- Configuración de bandas (reemplaza BANDS_CONFIG del archivo)
+CREATE TABLE IF NOT EXISTS band_config (
+    id              BIGSERIAL PRIMARY KEY,
+    guild_id        BIGINT NOT NULL,
+    name            TEXT NOT NULL,
+    leader_role_id  BIGINT NOT NULL,
+    member_role_id  BIGINT NOT NULL,
+    capacity        INTEGER NOT NULL,
+    owner_id        BIGINT,
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_band_config_member_role_active
+    ON band_config (guild_id, member_role_id) WHERE active = TRUE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_band_config_leader_role_active
+    ON band_config (guild_id, leader_role_id) WHERE active = TRUE;
 """
 
 
@@ -727,20 +746,57 @@ async def check_leader_assign(user_id: int, guild_id: int, target_band_role_id: 
 
 
 # ===== Eventos =====
+async def load_bands_from_db():
+    """Recarga las bandas desde la BD hacia los diccionarios globales.
+    Se llama al arrancar y después de cada creación/edición de banda."""
+    global LEADER_TO_MEMBER_ROLE, MEMBER_TO_LEADER_ROLE, BAND_CAPACITY, BAND_OWNER, BAND_NAMES
+
+    async with bot.db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT name, leader_role_id, member_role_id, capacity, owner_id FROM band_config WHERE active = TRUE"
+        )
+
+    LEADER_TO_MEMBER_ROLE = {r["leader_role_id"]: r["member_role_id"] for r in rows}
+    MEMBER_TO_LEADER_ROLE = {r["member_role_id"]: r["leader_role_id"] for r in rows}
+    BAND_CAPACITY = {r["member_role_id"]: r["capacity"] for r in rows}
+    BAND_OWNER = {r["member_role_id"]: r["owner_id"] for r in rows if r["owner_id"]}
+    BAND_NAMES = {r["member_role_id"]: r["name"] for r in rows}
+    return rows
+
+
+async def migrate_bands_config_if_empty():
+    """Si band_config está vacía y BANDS_CONFIG tiene datos, los importa a la BD."""
+    if not BANDS_CONFIG or not GUILD_ID:
+        return
+    async with bot.db_pool.acquire() as conn:
+        existing = await conn.fetchval("SELECT COUNT(*) FROM band_config")
+        if existing > 0:
+            return
+        log.info(f"Migrando {len(BANDS_CONFIG)} bandas de BANDS_CONFIG a la base de datos...")
+        for b in BANDS_CONFIG:
+            await conn.execute(
+                """
+                INSERT INTO band_config (guild_id, name, leader_role_id, member_role_id, capacity, owner_id, active)
+                VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+                """,
+                GUILD_ID, b["name"], b["leader_role"], b["member_role"], b["capacity"], b.get("owner_id"),
+            )
+        log.info("Migración completada.")
+
+
 @bot.event
 async def on_ready():
-    global LEADER_TO_MEMBER_ROLE, MEMBER_TO_LEADER_ROLE, BAND_CAPACITY, BAND_OWNER
-    LEADER_TO_MEMBER_ROLE = {b["leader_role"]: b["member_role"] for b in BANDS_CONFIG}
-    MEMBER_TO_LEADER_ROLE = {b["member_role"]: b["leader_role"] for b in BANDS_CONFIG}
-    BAND_CAPACITY = {b["member_role"]: b["capacity"] for b in BANDS_CONFIG}
-    BAND_OWNER = {b["member_role"]: b["owner_id"] for b in BANDS_CONFIG if b.get("owner_id")}
+    # Migrar BANDS_CONFIG a la BD si es la primera vez
+    await migrate_bands_config_if_empty()
+    # Cargar bandas activas desde la BD
+    await load_bands_from_db()
 
     log.info(f"Bot conectado como {bot.user} (ID: {bot.user.id})")
     log.info(f"Canal solicitar: {REQUEST_CHANNEL_ID} | Canal quitar: {REMOVE_CHANNEL_ID}")
-    log.info(f"Bandas configuradas: {len(BANDS_CONFIG)}")
-    for b in BANDS_CONFIG:
-        owner = b.get("owner_id", "sin dueño")
-        log.info(f"  - {b['name']}: capacidad {b['capacity']}, dueño: {owner}")
+    log.info(f"Bandas activas cargadas: {len(BAND_CAPACITY)}")
+    for member_role_id, name in BAND_NAMES.items():
+        owner = BAND_OWNER.get(member_role_id, "sin dueño")
+        log.info(f"  - {name}: capacidad {BAND_CAPACITY[member_role_id]}, dueño: {owner}")
 
     # Sincronizar slash commands con el guild (instantáneo, no global)
     # Envuelto en try/except para que un error de sync NO crashee el bot
@@ -1659,6 +1715,325 @@ async def contar_actos_slash(
         f"Otros (1.0 c/u): {other_count}",
         f"Puntuación total: **{score_str}**",
     ))
+
+
+# ===== Comandos de gestión de bandas =====
+
+@bot.tree.command(name="crear_banda", description="[Staff] Crea una nueva banda")
+@app_commands.describe(
+    nombre="Nombre visible de la banda",
+    rol_jefe="Rol de Jefe de la banda",
+    rol_miembro="Rol de integrante/miembro de la banda",
+    capacidad="Capacidad base (máximo de personas activas)",
+    dueno="Usuario dueño de la banda",
+)
+async def crear_banda_slash(
+    interaction: discord.Interaction,
+    nombre: str,
+    rol_jefe: discord.Role,
+    rol_miembro: discord.Role,
+    capacidad: int,
+    dueno: discord.Member,
+):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+    if capacidad <= 0:
+        await interaction.response.send_message(format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
+        return
+    if rol_jefe.id == rol_miembro.id:
+        await interaction.response.send_message(format_message("El rol de Jefe y el de integrante deben ser distintos"), ephemeral=True)
+        return
+
+    # Verificar que los roles no estén siendo usados por otra banda activa
+    async with bot.db_pool.acquire() as conn:
+        conflict = await conn.fetchrow(
+            """
+            SELECT name FROM band_config
+            WHERE guild_id = $1 AND active = TRUE
+              AND (leader_role_id IN ($2, $3) OR member_role_id IN ($2, $3))
+            """,
+            interaction.guild.id, rol_jefe.id, rol_miembro.id,
+        )
+        if conflict:
+            await interaction.response.send_message(format_message(
+                f"Uno de los roles ya está siendo usado por la banda **{conflict['name']}**",
+                "Si vas a reutilizar estos roles, primero cierra la banda anterior con /cerrar_banda",
+                "y borra su historial con /borrar_historial_banda",
+            ), ephemeral=True)
+            return
+
+        # Verificar si existe una banda inactiva con esos mismos roles (para avisar)
+        inactive = await conn.fetchrow(
+            """
+            SELECT id, name FROM band_config
+            WHERE guild_id = $1 AND active = FALSE
+              AND leader_role_id = $2 AND member_role_id = $3
+            """,
+            interaction.guild.id, rol_jefe.id, rol_miembro.id,
+        )
+        # Historial antiguo asociado a estos roles
+        old_history = await conn.fetchval(
+            "SELECT COUNT(*) FROM band_membership WHERE guild_id = $1 AND band_role_id = $2",
+            interaction.guild.id, rol_miembro.id,
+        )
+
+        # Crear la banda
+        new_id = await conn.fetchval(
+            """
+            INSERT INTO band_config (guild_id, name, leader_role_id, member_role_id, capacity, owner_id, active)
+            VALUES ($1, $2, $3, $4, $5, $6, TRUE) RETURNING id
+            """,
+            interaction.guild.id, nombre, rol_jefe.id, rol_miembro.id, capacidad, dueno.id,
+        )
+
+    await load_bands_from_db()
+
+    lines = [
+        f"Banda **{nombre}** creada (ID: {new_id})",
+        f"Rol Jefe: {rol_jefe.mention} · Rol integrante: {rol_miembro.mention}",
+        f"Capacidad: {capacidad} · Dueño: {dueno.mention}",
+        f"Creado por: {interaction.user.mention}",
+    ]
+    if old_history and old_history > 0:
+        lines.append(f"⚠️ Aviso: el rol de integrante tiene {old_history} registros de historial de una banda anterior. Usa /borrar_historial_banda si quieres empezar limpio")
+    await interaction.response.send_message(format_message(*lines))
+
+
+@bot.tree.command(name="editar_capacidad", description="[Staff] Cambia la capacidad base de una banda")
+@app_commands.describe(banda="Banda a editar", nueva_capacidad="Nueva capacidad base")
+async def editar_capacidad_slash(interaction: discord.Interaction, banda: discord.Role, nueva_capacidad: int):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+    if nueva_capacidad <= 0:
+        await interaction.response.send_message(format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name, capacity FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
+            interaction.guild.id, banda.id,
+        )
+        if not row:
+            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
+            return
+        old_capacity = row["capacity"]
+        await conn.execute("UPDATE band_config SET capacity = $1 WHERE id = $2", nueva_capacidad, row["id"])
+
+    await load_bands_from_db()
+    await interaction.response.send_message(format_message(
+        f"Capacidad de **{row['name']}** actualizada",
+        f"Antes: {old_capacity} · Ahora: {nueva_capacidad}",
+        f"Confirmado por: {interaction.user.mention}",
+    ))
+
+
+@bot.tree.command(name="editar_dueno", description="[Staff] Cambia el dueño de una banda")
+@app_commands.describe(banda="Banda a editar", nuevo_dueno="Nuevo usuario dueño")
+async def editar_dueno_slash(interaction: discord.Interaction, banda: discord.Role, nuevo_dueno: discord.Member):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name, owner_id FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
+            interaction.guild.id, banda.id,
+        )
+        if not row:
+            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
+            return
+        old_owner_id = row["owner_id"]
+        await conn.execute("UPDATE band_config SET owner_id = $1 WHERE id = $2", nuevo_dueno.id, row["id"])
+
+    await load_bands_from_db()
+    old_owner_str = f"<@{old_owner_id}>" if old_owner_id else "*sin dueño*"
+    await interaction.response.send_message(format_message(
+        f"Dueño de **{row['name']}** actualizado",
+        f"Antes: {old_owner_str} · Ahora: {nuevo_dueno.mention}",
+        f"Confirmado por: {interaction.user.mention}",
+    ))
+
+
+@bot.tree.command(name="cerrar_banda", description="[Staff] Desactiva una banda (mantiene el historial)")
+@app_commands.describe(banda="Banda a cerrar")
+async def cerrar_banda_slash(interaction: discord.Interaction, banda: discord.Role):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
+            interaction.guild.id, banda.id,
+        )
+        if not row:
+            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
+            return
+        await conn.execute("UPDATE band_config SET active = FALSE WHERE id = $1", row["id"])
+
+    await load_bands_from_db()
+    await interaction.response.send_message(format_message(
+        f"Banda **{row['name']}** cerrada",
+        "Los roles quedan libres para reutilizar en otra banda",
+        "El historial se conserva. Usa /reactivar_banda para volver a activarla",
+        f"Confirmado por: {interaction.user.mention}",
+    ))
+
+
+@bot.tree.command(name="reactivar_banda", description="[Staff] Reactiva una banda que fue cerrada")
+@app_commands.describe(banda_id="ID de la banda (usa /lista_bandas para verlo)")
+async def reactivar_banda_slash(interaction: discord.Interaction, banda_id: int):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name, leader_role_id, member_role_id, active FROM band_config WHERE guild_id = $1 AND id = $2",
+            interaction.guild.id, banda_id,
+        )
+        if not row:
+            await interaction.response.send_message(format_message(f"No existe ninguna banda con ID `{banda_id}`"), ephemeral=True)
+            return
+        if row["active"]:
+            await interaction.response.send_message(format_message(f"La banda **{row['name']}** ya está activa"), ephemeral=True)
+            return
+        # Verificar que los roles no estén siendo usados por otra activa
+        conflict = await conn.fetchrow(
+            """
+            SELECT name FROM band_config
+            WHERE guild_id = $1 AND active = TRUE
+              AND (leader_role_id IN ($2, $3) OR member_role_id IN ($2, $3))
+            """,
+            interaction.guild.id, row["leader_role_id"], row["member_role_id"],
+        )
+        if conflict:
+            await interaction.response.send_message(format_message(
+                f"No se puede reactivar: los roles están en uso por la banda **{conflict['name']}**",
+            ), ephemeral=True)
+            return
+        await conn.execute("UPDATE band_config SET active = TRUE WHERE id = $1", banda_id)
+
+    await load_bands_from_db()
+    await interaction.response.send_message(format_message(
+        f"Banda **{row['name']}** reactivada",
+        f"Confirmado por: {interaction.user.mention}",
+    ))
+
+
+@bot.tree.command(name="borrar_historial_banda", description="[Staff] Borra el historial de membresías asociado a un rol")
+@app_commands.describe(rol_miembro="Rol de integrante cuyo historial quieres borrar")
+async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_miembro: discord.Role):
+    if not is_staff(interaction.user):
+        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        # Verificar si el rol está en uso por una banda ACTIVA
+        active_band = await conn.fetchrow(
+            "SELECT name FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
+            interaction.guild.id, rol_miembro.id,
+        )
+        if active_band:
+            await interaction.response.send_message(format_message(
+                f"No puedo borrar el historial: {rol_miembro.mention} está en uso por la banda activa **{active_band['name']}**",
+                "Primero cierra la banda con /cerrar_banda",
+            ), ephemeral=True)
+            return
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM band_membership WHERE guild_id = $1 AND band_role_id = $2",
+            interaction.guild.id, rol_miembro.id,
+        )
+
+    if total == 0:
+        await interaction.response.send_message(format_message(
+            f"No hay historial que borrar para {rol_miembro.mention}",
+        ), ephemeral=True)
+        return
+
+    # Confirmación con botón
+    class ConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30)
+            self.confirmed = False
+
+        @discord.ui.button(label="Borrar historial", style=discord.ButtonStyle.danger)
+        async def confirm(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("Solo quien ejecutó el comando puede confirmar", ephemeral=True)
+                return
+            self.confirmed = True
+            self.stop()
+            await btn_interaction.response.defer()
+
+        @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
+        async def cancel(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("Solo quien ejecutó el comando puede cancelar", ephemeral=True)
+                return
+            self.stop()
+            await btn_interaction.response.defer()
+
+    view = ConfirmView()
+    await interaction.response.send_message(format_message(
+        f"**CONFIRMACIÓN REQUERIDA**",
+        f"Vas a borrar **{total}** registros de historial asociados a {rol_miembro.mention}",
+        "Esta acción NO se puede deshacer",
+        "Tienes 30 segundos para confirmar",
+    ), view=view)
+
+    await view.wait()
+    if not view.confirmed:
+        await interaction.followup.send(format_message("Operación cancelada"))
+        return
+
+    async with bot.db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM band_membership WHERE guild_id = $1 AND band_role_id = $2",
+            interaction.guild.id, rol_miembro.id,
+        )
+
+    await interaction.followup.send(format_message(
+        f"Historial borrado ({total} registros eliminados)",
+        f"Rol: {rol_miembro.mention}",
+        f"Confirmado por: {interaction.user.mention}",
+    ))
+
+
+@bot.tree.command(name="lista_bandas", description="Lista todas las bandas configuradas (activas e inactivas)")
+async def lista_bandas_slash(interaction: discord.Interaction):
+    async with bot.db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, leader_role_id, member_role_id, capacity, owner_id, active, created_at FROM band_config WHERE guild_id = $1 ORDER BY active DESC, name ASC",
+            interaction.guild.id,
+        )
+
+    if not rows:
+        await interaction.response.send_message(format_message("No hay bandas configuradas"))
+        return
+
+    active_lines = ["**Bandas activas:**"]
+    inactive_lines = ["**Bandas cerradas:**"]
+    for r in rows:
+        owner = f"<@{r['owner_id']}>" if r["owner_id"] else "sin dueño"
+        line = (
+            f"ID `{r['id']}` · **{r['name']}** · "
+            f"Jefe: <@&{r['leader_role_id']}> · integrante: <@&{r['member_role_id']}> · "
+            f"cap {r['capacity']} · dueño {owner}"
+        )
+        if r["active"]:
+            active_lines.append(line)
+        else:
+            inactive_lines.append(line)
+
+    lines = []
+    if len(active_lines) > 1:
+        lines.extend(active_lines)
+    if len(inactive_lines) > 1:
+        lines.extend(inactive_lines)
+    await interaction.response.send_message(format_message(*lines))
 
 
 # ===== Main =====
