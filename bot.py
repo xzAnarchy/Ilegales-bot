@@ -51,7 +51,9 @@ WEEKLY_MEMBER_LIMIT = 7
 MAX_LEADERS_PER_BAND = 3
 MIN_DAYS_AS_MEMBER_FOR_LEADER = 15
 
-REACTION_CONFIRM = "⬇️"
+STAFF_REACTION = "⬇️"           # Emoji que el staff pone para confirmar la acción
+BOT_REACTION_SUCCESS = "✅"      # Emoji que el bot añade cuando todo salió bien
+BOT_REACTION_FAIL = "❌"         # Emoji que el bot añade cuando algo falló
 LEADER_KEYWORD = "jefe"  # Palabra clave para detectar solicitud de jefe
 BYPASS_COOLDOWN_KEYWORDS = {"cooldown", "cd"}  # Palabras que saltan ambos cooldowns
 DEMOTE_KEYWORDS = {"degradar", "degradación", "degradacion", "bajar"}
@@ -61,133 +63,134 @@ DEMOTE_KEYWORDS = {"degradar", "degradación", "degradacion", "bajar"}
 #   - member_role:   ID del rol de miembro
 #   - capacity:      máximo de personas activas (miembros + jefes)
 #   - owner_id:      ID del usuario dueño de la banda (puede solicitar/quitar jefes; nadie puede quitarle el rango)
-BANDS_CONFIG: list[dict] = [    
-     {
-        "name":        "Poison Crew",
-        "leader_role": 1194817495211720724,
-        "member_role": 1183559269476479038,
-        "capacity":    17,
-        "owner_id":    1041454182344949771,
- },
-     {
-         "name":        "Sin Ley",
-         "leader_role": 1202433355229040741,
-         "member_role": 1202433274425778228,
-         "capacity":    17,
-         "owner_id":    1317252417645052009,
-     },
-     {
-         "name":        "K9",
-         "leader_role": 1209199793730232360,
-         "member_role": 1209199543904894986,
-         "capacity":    17,
-         "owner_id":    1199435499824226534,
-     },
-     {
-         "name":        "Faze",
-         "leader_role": 1213885972148658226,
-         "member_role": 1213885841223712818,
-         "capacity":    17,
-         "owner_id":    702329561622249535,
-     },
-     {
-         "name":        "Pinky Blinders",
-         "leader_role": 1232570043175534602,
-         "member_role": 1232570426790641684,
-         "capacity":    17,
-         "owner_id":    430830587641856021,
-     },
-     {
-         "name":        "Esex Gang",
-         "leader_role": 1256718554422706246,
-         "member_role": 1256718594067140648,
-         "capacity":    17,
-         "owner_id":    753750899158941726,
-     },
-     {
-         "name":        "Black Vipers",
-         "leader_role": 1266240280580063256,
-         "member_role": 1266240330764910622,
-         "capacity":    14,
-         "owner_id":    704694925144621117,
-     },
-     {
-         "name":        "Enigma Crew",
-         "leader_role": 1281111966827679836,
-         "member_role": 1281112212160774235,
-         "capacity":    17,
-         "owner_id":    1275573986314686575,
-     },
-     {
-         "name":        "Dont trust strangers",
-         "leader_role": 1330669573242097786,
-         "member_role": 1330669301631291433,
-         "capacity":    17,
-         "owner_id":    470249013455749140,
-     },
-     {
-         "name":        "RG4",
-         "leader_role": 1283255788139184188,
-         "member_role": 1283255795122831410,
-         "capacity":    17,
-         "owner_id":    559042930132779025,
-     },
-     {
-         "name":        "C´est La Mort",
-         "leader_role": 1355029136783179786,
-         "member_role": 1355028215000858624,
-         "capacity":    17,
-         "owner_id":    1345387913260568637,
-     },
-     {
-         "name":        "Legends Never Die",
-         "leader_role": 1407916113685381262,
-         "member_role": 1407916043132993567,
-         "capacity":    17,
-         "owner_id":    700171212654903396,
-     },
-     {
-         "name":        "Spt",
-         "leader_role": 1276961456642064384,
-         "member_role": 1276961557124747398,
-         "capacity":    17,
-         "owner_id":    1155673440808865843,
-     },
-     {
-         "name":        "TDZ",
-         "leader_role": 1349210777499865109,
-         "member_role": 1349210967984050237,
-         "capacity":    17,
-         "owner_id":    605235307910135808,
-     },
-     {
-         "name":        "Streetgang",
-         "leader_role": 1211157133341757450,
-         "member_role": 1211157225146421289,
-         "capacity":    14,
-         "owner_id":    1151562055896289320,
-     },
-     {
-         "name":        "3030",
-         "leader_role": 1241895748447244298,
-         "member_role": 1241895614988423310,
-         "capacity":    17,
-         "owner_id":    376897121795833856,
-     },
-     {
-         "name":        "Underwater",
-         "leader_role": 1283249693412954126,
-         "member_role": 1283249702959058956,
-         "capacity":    14,
-         "owner_id":    347082369926430721,
-     },
-]
+# BANDS_CONFIG: list[dict] = [    
+#      {
+#         "name":        "Poison Crew",
+#         "leader_role": 1194817495211720724,
+#         "member_role": 1183559269476479038,
+#         "capacity":    17,
+#         "owner_id":    1041454182344949771,
+#  },
+#      {
+#          "name":        "Sin Ley",
+#          "leader_role": 1202433355229040741,
+#          "member_role": 1202433274425778228,
+#          "capacity":    17,
+#          "owner_id":    1317252417645052009,
+#      },
+#      {
+#          "name":        "K9",
+#          "leader_role": 1209199793730232360,
+#          "member_role": 1209199543904894986,
+#          "capacity":    17,
+#          "owner_id":    1199435499824226534,
+#      },
+#      {
+#          "name":        "Faze",
+#          "leader_role": 1213885972148658226,
+#          "member_role": 1213885841223712818,
+#          "capacity":    17,
+#          "owner_id":    702329561622249535,
+#      },
+#      {
+#          "name":        "Pinky Blinders",
+#          "leader_role": 1232570043175534602,
+#          "member_role": 1232570426790641684,
+#          "capacity":    17,
+#          "owner_id":    430830587641856021,
+#      },
+#      {
+#          "name":        "Esex Gang",
+#          "leader_role": 1256718554422706246,
+#          "member_role": 1256718594067140648,
+#          "capacity":    17,
+#          "owner_id":    753750899158941726,
+#      },
+#      {
+#          "name":        "Black Vipers",
+#          "leader_role": 1266240280580063256,
+#          "member_role": 1266240330764910622,
+#          "capacity":    14,
+#          "owner_id":    704694925144621117,
+#      },
+#      {
+#          "name":        "Enigma Crew",
+#          "leader_role": 1281111966827679836,
+#          "member_role": 1281112212160774235,
+#          "capacity":    17,
+#          "owner_id":    1275573986314686575,
+#      },
+#      {
+#          "name":        "Dont trust strangers",
+#          "leader_role": 1330669573242097786,
+#          "member_role": 1330669301631291433,
+#          "capacity":    17,
+#          "owner_id":    470249013455749140,
+#      },
+#      {
+#          "name":        "RG4",
+#          "leader_role": 1283255788139184188,
+#          "member_role": 1283255795122831410,
+#          "capacity":    17,
+#          "owner_id":    559042930132779025,
+#      },
+#      {
+#          "name":        "C´est La Mort",
+#          "leader_role": 1355029136783179786,
+#          "member_role": 1355028215000858624,
+#          "capacity":    17,
+#          "owner_id":    1345387913260568637,
+#      },
+#      {
+#          "name":        "Legends Never Die",
+#          "leader_role": 1407916113685381262,
+#          "member_role": 1407916043132993567,
+#          "capacity":    17,
+#          "owner_id":    700171212654903396,
+#      },
+#      {
+#          "name":        "Spt",
+#          "leader_role": 1276961456642064384,
+#          "member_role": 1276961557124747398,
+#          "capacity":    17,
+#          "owner_id":    1155673440808865843,
+#      },
+#      {
+#          "name":        "TDZ",
+#          "leader_role": 1349210777499865109,
+#          "member_role": 1349210967984050237,
+#          "capacity":    17,
+#          "owner_id":    605235307910135808,
+#      },
+#      {
+#          "name":        "Streetgang",
+#          "leader_role": 1211157133341757450,
+#          "member_role": 1211157225146421289,
+#          "capacity":    14,
+#          "owner_id":    1151562055896289320,
+#      },
+#      {
+#          "name":        "3030",
+#          "leader_role": 1241895748447244298,
+#          "member_role": 1241895614988423310,
+#          "capacity":    17,
+#          "owner_id":    376897121795833856,
+#      },
+#      {
+#          "name":        "Underwater",
+#          "leader_role": 1283249693412954126,
+#          "member_role": 1283249702959058956,
+#          "capacity":    14,
+#          "owner_id":    347082369926430721,
+#      },
+# ]
 
 # Mapeos derivados (se calculan al inicio, no editar a mano)
 LEADER_TO_MEMBER_ROLE: dict[int, int] = {}
 MEMBER_TO_LEADER_ROLE: dict[int, int] = {}
 BAND_CAPACITY: dict[int, int] = {}  # member_role_id -> capacity
 BAND_OWNER: dict[int, int] = {}     # member_role_id -> owner user_id
+BAND_NAMES: dict[int, str] = {}
 
 # IDs de roles que pueden confirmar (admin/staff)
 STAFF_ROLE_IDS: set[int] = {
@@ -508,6 +511,16 @@ async def continuous_member_days_in_band(user_id: int, guild_id: int, band_role_
 
 # ===== Utilidades =====
 SEPARATOR = "-" * 49
+
+
+async def react_result(message: discord.Message, success: bool):
+    """Reacciona al mensaje original con ✅ (éxito) o ❌ (fallo).
+    Ignora silenciosamente si el bot no tiene permisos para reaccionar."""
+    emoji = BOT_REACTION_SUCCESS if success else BOT_REACTION_FAIL
+    try:
+        await message.add_reaction(emoji)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
 
 
 def format_message(*lines: str) -> str:
@@ -856,7 +869,7 @@ async def on_ready():
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.user_id == bot.user.id:
         return
-    if str(payload.emoji) != REACTION_CONFIRM:
+    if str(payload.emoji) != STAFF_REACTION:
         return
     if payload.channel_id not in (REQUEST_CHANNEL_ID, REMOVE_CHANNEL_ID):
         return
@@ -905,8 +918,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     demote_request = is_demote_request(message)
     bypass = is_bypass_cooldown(message)
 
+    all_success = True
+    any_processed = False
+
     # Procesar cada mención por separado
     for target in targets:
+        any_processed = True
         if payload.channel_id == REQUEST_CHANNEL_ID:
             # En SOLICITAR: si el usuario ya no está en el servidor, no se le puede dar un rol
             if not isinstance(target, discord.Member):
@@ -914,25 +931,33 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     f"{target.mention} No se le puede asignar un rango",
                     "Motivo: El usuario no está en el servidor de Discord",
                 ))
+                all_success = False
                 continue
 
             # Asignar: la palabra 'jefe' decide si se asigna jefe o miembro
             if leader_request:
-                await handle_assign_leader(channel, target, band_role, reactor, leader)
+                success = await handle_assign_leader(channel, target, band_role, reactor, leader)
             else:
-                await handle_assign_member(channel, target, band_role, reactor, leader, bypass=bypass)
+                success = await handle_assign_member(channel, target, band_role, reactor, leader, bypass=bypass)
         else:
             # Quitar:
             #   - 'jefe' o 'degradar'/'bajar' -> degrada a miembro
             #   - sin palabras especiales -> expulsión total (jefe y miembro)
             if leader_request or demote_request:
-                await handle_demote(channel, target, band_role, reactor, leader)
+                success = await handle_demote(channel, target, band_role, reactor, leader)
             else:
-                await handle_remove_full(channel, target, band_role, reactor, leader)
+                success = await handle_remove_full(channel, target, band_role, reactor, leader)
+
+        if not success:
+            all_success = False
+
+    # Reaccionar al mensaje original según el resultado
+    if any_processed:
+        await react_result(message, all_success)
 
 
 # ===== Handlers de asignación/remoción (por reacción) =====
-async def handle_assign_member(channel, member, band_role, reactor, leader, bypass: bool = False):
+async def handle_assign_member(channel, member, band_role, reactor, leader, bypass: bool = False) -> bool:
     can_join, error_lines = await check_member_assign(member.id, channel.guild.id, band_role.id, bypass_cooldowns=bypass)
     if not can_join:
         # error_lines[0] es el título, el resto son viñetas
@@ -940,7 +965,7 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
             f"{member.mention} {error_lines[0]}",
             *error_lines[1:],
         ))
-        return
+        return False
 
     reason = f"Miembro asignado por {reactor} (jefe: {leader})"
     if bypass:
@@ -950,7 +975,7 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
         await member.add_roles(band_role, reason=reason)
     except discord.Forbidden:
         await channel.send(format_message("No tengo permisos para asignar ese rol"))
-        return
+        return False
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="member")
     weekly = await count_weekly_member_assignments(channel.guild.id, band_role.id)
@@ -965,18 +990,19 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
         f"Confirmado por {reactor.mention}",
         f"Estado actual: Cupo Semanal {weekly}/{WEEKLY_MEMBER_LIMIT} · Integrantes {total}/{effective_capacity}",
     ))
+    return True
 
 
-async def handle_assign_leader(channel, member, band_role, reactor, leader):
+async def handle_assign_leader(channel, member, band_role, reactor, leader) -> bool:
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id is None:
         await channel.send(format_message(f"{band_role.mention} no tiene **dueño** configurado"))
-        return
+        return False
     if leader.id != owner_id:
         await channel.send(format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede solicitar nuevos Jefes"
         ))
-        return
+        return False
 
     can_join, error_lines = await check_leader_assign(member.id, channel.guild.id, band_role.id)
     if not can_join:
@@ -984,16 +1010,16 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader):
             f"{member.mention} {error_lines[0]}",
             *error_lines[1:],
         ))
-        return
+        return False
 
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(band_role.id)
     if leader_role_id is None:
         await channel.send(format_message(f"No hay rol de **Jefe** configurado para {band_role.mention}"))
-        return
+        return False
     leader_role = channel.guild.get_role(leader_role_id)
     if leader_role is None:
         await channel.send(format_message(f"Rol de **Jefe** (ID {leader_role_id}) no encontrado"))
-        return
+        return False
 
     # Cerrar la membresía de tipo 'member' (si existe) en BD
     # NOTA: NO quitamos el rol de miembro en Discord — los jefes tienen AMBOS roles (jefe + miembro)
@@ -1008,7 +1034,7 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader):
             await member.add_roles(band_role, reason="Rol de miembro asegurado al ascender a Jefe")
     except discord.Forbidden:
         await channel.send(format_message("No tengo permisos para gestionar los roles"))
-        return
+        return False
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="leader")
     leader_count = await count_active_leaders(channel.guild.id, band_role.id)
@@ -1022,16 +1048,17 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader):
         f"Confirmado por {reactor.mention}",
         f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
+    return True
 
 
-async def handle_remove_full(channel, member, band_role, reactor, leader):
+async def handle_remove_full(channel, member, band_role, reactor, leader) -> bool:
     """Expulsa COMPLETAMENTE de la banda: quita rol de jefe (si lo tiene), quita rol de miembro,
     cierra todas las membresías activas y aplica cooldown.
     Funciona incluso si el usuario ya salió del servidor (solo actualiza la BD)."""
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id and member.id == owner_id:
         await channel.send(format_message(f"No se le puede quitar el rango al **dueño** de la banda ({member.mention})"))
-        return
+        return False
 
     active_member = await get_active_membership(member.id, channel.guild.id, role_kind="member")
     active_leader = await get_active_membership(member.id, channel.guild.id, role_kind="leader")
@@ -1041,14 +1068,14 @@ async def handle_remove_full(channel, member, band_role, reactor, leader):
 
     if not is_member_here and not is_leader_here:
         await channel.send(format_message(f"{member.mention} no está activamente en {band_role.mention}"))
-        return
+        return False
 
     # Si es jefe, solo el dueño puede expulsarlo
     if is_leader_here and leader.id != owner_id:
         await channel.send(format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede expulsar a un **Jefe**"
         ))
-        return
+        return False
 
     # Detectar si el usuario aún está en el servidor (es Member) o salió (solo User)
     is_in_server = isinstance(member, discord.Member)
@@ -1068,7 +1095,7 @@ async def handle_remove_full(channel, member, band_role, reactor, leader):
                 await member.remove_roles(*roles_to_remove, reason=f"Expulsado por {reactor} (jefe: {leader})")
             except discord.Forbidden:
                 await channel.send(format_message("No tengo permisos para remover los roles"))
-                return
+                return False
     else:
         left_server_note = " (el usuario ya no está en el servidor)"
 
@@ -1088,29 +1115,30 @@ async def handle_remove_full(channel, member, band_role, reactor, leader):
         f"Confirmado por {reactor.mention}",
         f"Estado actual: Se activó el cooldown · Integrantes {total}/{effective_capacity}",
     ))
+    return True
 
 
-async def handle_demote(channel, member, band_role, reactor, leader):
+async def handle_demote(channel, member, band_role, reactor, leader) -> bool:
     """Degrada de jefe a miembro: quita rol de jefe, asigna rol de miembro.
     NO consume cupo semanal porque es un cambio de rol, no una entrada nueva."""
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id is None:
         await channel.send(format_message(f"{band_role.mention} no tiene **dueño** configurado"))
-        return
+        return False
     if leader.id != owner_id:
         await channel.send(format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede degradar a un **Jefe**"
         ))
-        return
+        return False
 
     if member.id == owner_id:
         await channel.send(format_message(f"No se le puede degradar al **dueño** ({member.mention})"))
-        return
+        return False
 
     active = await get_active_membership(member.id, channel.guild.id, role_kind="leader")
     if not active or active["band_role_id"] != band_role.id:
         await channel.send(format_message(f"{member.mention} no es **Jefe** activo de {band_role.mention}"))
-        return
+        return False
 
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(band_role.id)
     leader_role = channel.guild.get_role(leader_role_id) if leader_role_id else None
@@ -1128,7 +1156,7 @@ async def handle_demote(channel, member, band_role, reactor, leader):
                 await member.add_roles(band_role, reason="Rol de miembro asegurado al degradar")
         except discord.Forbidden:
             await channel.send(format_message("No tengo permisos para gestionar los roles"))
-            return
+            return False
     else:
         left_server_note = " (el usuario ya no está en el servidor)"
 
@@ -1163,6 +1191,7 @@ async def handle_demote(channel, member, band_role, reactor, leader):
         f"Confirmado por {reactor.mention}",
         f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
     ))
+    return True
 
 
 # ===== SLASH COMMANDS =====
