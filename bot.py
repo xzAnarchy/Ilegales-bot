@@ -58,6 +58,8 @@ LEADER_KEYWORD = "jefe"  # Palabra clave para detectar solicitud de jefe
 BYPASS_COOLDOWN_KEYWORDS = {"cooldown", "cd"}  # Palabras que saltan ambos cooldowns
 DEMOTE_KEYWORDS = {"degradar", "degradación", "degradacion", "bajar"}
 
+BANDS_CONFIG: list[dict] = []
+
 # Configuración de bandas. Para cada banda especifica:
 #   - leader_role:   ID del rol de jefe
 #   - member_role:   ID del rol de miembro
