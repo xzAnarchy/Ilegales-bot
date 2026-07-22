@@ -518,6 +518,42 @@ def format_message(*lines: str) -> str:
     return "\n".join(formatted) + "\n" + SEPARATOR
 
 
+def split_long_message(text: str, limit: int = 1900) -> list[str]:
+    """Divide un texto largo en varios chunks respetando saltos de línea.
+    Discord limita a 2000 caracteres; usamos 1900 como margen de seguridad."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    current = ""
+    for line in text.split("\n"):
+        # Si sumar esta línea excede el límite, cerramos el chunk actual
+        if len(current) + len(line) + 1 > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+        # Si la línea sola excede el límite, la partimos por fuerza
+        if len(line) > limit:
+            for i in range(0, len(line), limit):
+                chunks.append(line[i:i + limit])
+            continue
+        current = f"{current}\n{line}" if current else line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def send_long(interaction: discord.Interaction, text: str, ephemeral: bool = False):
+    """Envía un mensaje largo dividiéndolo en varios si excede 2000 caracteres."""
+    chunks = split_long_message(text)
+    if not chunks:
+        return
+    # Primero se responde con el primer chunk
+    await interaction.response.send_message(chunks[0], ephemeral=ephemeral)
+    # Los demás como followups
+    for chunk in chunks[1:]:
+        await interaction.followup.send(chunk, ephemeral=ephemeral)
+
+
 def _format_remaining(delta: timedelta) -> str:
     total_seconds = int(delta.total_seconds())
     days, rem = divmod(total_seconds, 86400)
@@ -1620,7 +1656,7 @@ async def cupos_extras_lista_slash(interaction: discord.Interaction, banda: disc
         )
     total = sum(r["amount"] for r in rows)
     lines.append(f"**Total cupos extra activos: {total}**")
-    await interaction.response.send_message(format_message(*lines))
+    await send_long(interaction, format_message(*lines))
 
 
 @bot.tree.command(name="cupo_extra_quitar", description="[Staff] Elimina un cupo extra por su ID")
@@ -2033,7 +2069,7 @@ async def lista_bandas_slash(interaction: discord.Interaction):
         lines.extend(active_lines)
     if len(inactive_lines) > 1:
         lines.extend(inactive_lines)
-    await interaction.response.send_message(format_message(*lines))
+    await send_long(interaction, format_message(*lines))
 
 
 # ===== Main =====
