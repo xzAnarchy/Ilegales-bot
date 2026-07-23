@@ -816,15 +816,17 @@ async def load_bands_from_db():
 
 
 async def migrate_bands_config_if_empty():
-    """Si band_config está vacía y BANDS_CONFIG tiene datos, los importa a la BD."""
-    if not BANDS_CONFIG or not GUILD_ID:
+    """Si band_config está vacía y BANDS_CONFIG tiene datos, los importa a la BD.
+    Si BANDS_CONFIG no existe (fue borrado del archivo), simplemente no migra nada."""
+    bands_to_migrate = globals().get("BANDS_CONFIG", [])
+    if not bands_to_migrate or not GUILD_ID:
         return
     async with bot.db_pool.acquire() as conn:
         existing = await conn.fetchval("SELECT COUNT(*) FROM band_config")
         if existing > 0:
             return
-        log.info(f"Migrando {len(BANDS_CONFIG)} bandas de BANDS_CONFIG a la base de datos...")
-        for b in BANDS_CONFIG:
+        log.info(f"Migrando {len(bands_to_migrate)} bandas de BANDS_CONFIG a la base de datos...")
+        for b in bands_to_migrate:
             await conn.execute(
                 """
                 INSERT INTO band_config (guild_id, name, leader_role_id, member_role_id, capacity, owner_id, active)
@@ -1416,6 +1418,8 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
         f"Vas a desmantelar **{banda.name}**:",
         "Expulsa a TODOS los miembros y Jefes (incluido el dueño)",
         f"Cooldown de **{DISBANDMENT_COOLDOWN_DAYS} días** para unirse a CUALQUIER banda",
+        "La banda quedará **cerrada** (los roles pueden reutilizarse)",
+        "El historial se conserva. Usa /borrar_historial_banda si quieres borrarlo",
         "Esta acción NO se puede deshacer",
         "Tienes 30 segundos para confirmar",
     ), view=view)
@@ -1430,10 +1434,6 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
             "SELECT id, user_id, role_kind FROM band_membership WHERE guild_id = $1 AND band_role_id = $2 AND left_at IS NULL",
             interaction.guild.id, banda.id,
         )
-
-    if not rows:
-        await interaction.followup.send(format_message(f"{banda.mention} no tiene miembros ni Jefes activos"))
-        return
 
     affected_user_ids = {row["user_id"] for row in rows}
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(banda.id)
@@ -1466,10 +1466,22 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
         )
         expelled_count += 1
 
+    # Cerrar la banda en band_config y recargar mapeos
+    async with bot.db_pool.acquire() as conn:
+        band_row = await conn.fetchrow(
+            "SELECT id, name FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
+            interaction.guild.id, banda.id,
+        )
+        band_name = band_row["name"] if band_row else banda.name
+        if band_row:
+            await conn.execute("UPDATE band_config SET active = FALSE WHERE id = $1", band_row["id"])
+    await load_bands_from_db()
+
     msg_lines = [
-        f"**{banda.name}** ha sido desmantelada",
+        f"**{band_name}** ha sido desmantelada y cerrada",
         f"Personas expulsadas: **{expelled_count}**",
         f"Cooldown aplicado: **{DISBANDMENT_COOLDOWN_DAYS} días** para unirse a cualquier banda",
+        "La banda quedó cerrada. Sus roles pueden reutilizarse para otra banda",
         f"Confirmado por: {interaction.user.mention}",
     ]
     if role_errors:
@@ -1710,79 +1722,6 @@ async def cupo_extra_quitar_slash(interaction: discord.Interaction, extra_id: in
     ))
 
 
-# ===== Comandos de actos delictivos =====
-
-ACTO_DELICTIVO_MARKER = "acto delictivo"
-FLEECA_PATTERN = re.compile(r"\b(fleeca|flecca|fleecca)\b", re.IGNORECASE)
-
-
-@bot.tree.command(name="contar_actos", description="Cuenta los actos delictivos reportados en un canal desde una fecha")
-@app_commands.describe(
-    desde="Fecha desde la que contar (formato: YYYY-MM-DD, ej: 2026-04-01)",
-    canal="Canal donde están los reportes (por defecto, este canal)",
-)
-async def contar_actos_slash(
-    interaction: discord.Interaction,
-    desde: str,
-    canal: discord.TextChannel | None = None,
-):
-    # Validar fecha
-    try:
-        from_date = datetime.strptime(desde, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except ValueError:
-        await interaction.response.send_message(format_message(
-            "Formato de fecha inválido",
-            "Usa el formato YYYY-MM-DD (ejemplo: 2026-04-01)",
-        ), ephemeral=True)
-        return
-
-    target_channel = canal or interaction.channel
-
-    # Defer porque la lectura del historial puede tardar
-    await interaction.response.defer(thinking=True)
-
-    total_acts = 0
-    fleeca_count = 0
-    other_count = 0
-    score = 0.0
-
-    try:
-        async for message in target_channel.history(after=from_date, limit=None, oldest_first=True):
-            if message.author.bot:
-                continue
-            content_lower = message.content.lower()
-            # Solo contar mensajes que contengan el marcador "Acto delictivo:"
-            if ACTO_DELICTIVO_MARKER not in content_lower:
-                continue
-
-            total_acts += 1
-            if FLEECA_PATTERN.search(message.content):
-                fleeca_count += 1
-                score += 0.5
-            else:
-                other_count += 1
-                score += 1.0
-    except discord.Forbidden:
-        await interaction.followup.send(format_message(
-            f"No tengo permisos para leer el historial de {target_channel.mention}",
-        ), ephemeral=True)
-        return
-
-    # Formatear el score sin .0 si es entero
-    if score == int(score):
-        score_str = str(int(score))
-    else:
-        score_str = f"{score:.1f}"
-
-    await interaction.followup.send(format_message(
-        f"**Actos delictivos en {target_channel.mention}**",
-        f"Desde: **{desde}** hasta hoy",
-        f"Total de actos: **{total_acts}**",
-        f"Fleeca (0.5 c/u): {fleeca_count}",
-        f"Otros (1.0 c/u): {other_count}",
-        f"Puntuación total: **{score_str}**",
-    ))
-
 
 # ===== Comandos de gestión de bandas =====
 
@@ -1919,32 +1858,6 @@ async def editar_dueno_slash(interaction: discord.Interaction, banda: discord.Ro
     await interaction.response.send_message(format_message(
         f"Dueño de **{row['name']}** actualizado",
         f"Antes: {old_owner_str} · Ahora: {nuevo_dueno.mention}",
-        f"Confirmado por: {interaction.user.mention}",
-    ))
-
-
-@bot.tree.command(name="cerrar_banda", description="[Staff] Desactiva una banda (mantiene el historial)")
-@app_commands.describe(banda="Banda a cerrar")
-async def cerrar_banda_slash(interaction: discord.Interaction, banda: discord.Role):
-    if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
-        return
-
-    async with bot.db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, name FROM band_config WHERE guild_id = $1 AND member_role_id = $2 AND active = TRUE",
-            interaction.guild.id, banda.id,
-        )
-        if not row:
-            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
-            return
-        await conn.execute("UPDATE band_config SET active = FALSE WHERE id = $1", row["id"])
-
-    await load_bands_from_db()
-    await interaction.response.send_message(format_message(
-        f"Banda **{row['name']}** cerrada",
-        "Los roles quedan libres para reutilizar en otra banda",
-        "El historial se conserva. Usa /reactivar_banda para volver a activarla",
         f"Confirmado por: {interaction.user.mention}",
     ))
 
