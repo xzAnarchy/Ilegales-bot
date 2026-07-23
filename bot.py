@@ -575,11 +575,11 @@ def _detect_message_type(lines: tuple[str, ...]) -> str:
 
 
 def format_message(*lines: str, kind: str | None = None) -> discord.Embed:
-    """Devuelve un embed formateado con los textos como una descripción bulleteada.
+    """Devuelve un embed con las líneas como una descripción bulleteada.
     `kind` puede ser 'success', 'error', 'warning' o 'info'.
     Si no se pasa, se detecta automáticamente del contenido."""
     if not lines:
-        return discord.Embed(description=SEPARATOR, color=COLOR_INFO)
+        return discord.Embed(color=COLOR_INFO)
 
     if kind is None:
         kind = _detect_message_type(lines)
@@ -592,7 +592,7 @@ def format_message(*lines: str, kind: str | None = None) -> discord.Embed:
     }
     color = color_map.get(kind, COLOR_INFO)
 
-    description = "\n".join(f"- {line}" for line in lines) + f"\n{SEPARATOR}"
+    description = "\n".join(f"- {line}" for line in lines)
     return discord.Embed(description=description, color=color)
 
 
