@@ -525,12 +525,75 @@ async def react_result(message: discord.Message, success: bool):
         pass
 
 
-def format_message(*lines: str) -> str:
-    """Formatea un mensaje uniforme: todas las líneas con viñeta + separador final."""
+# Colores para los embeds
+COLOR_SUCCESS = discord.Color.from_rgb(87, 242, 135)   # Verde
+COLOR_ERROR = discord.Color.from_rgb(237, 66, 69)      # Rojo
+COLOR_INFO = discord.Color.from_rgb(88, 101, 242)      # Azul
+COLOR_WARNING = discord.Color.from_rgb(255, 170, 0)    # Naranja
+
+
+def _detect_message_type(lines: tuple[str, ...]) -> str:
+    """Detecta si el mensaje es de éxito, error o info según su contenido."""
     if not lines:
-        return SEPARATOR
-    formatted = [f"- {line}" for line in lines]
-    return "\n".join(formatted) + "\n" + SEPARATOR
+        return "info"
+    joined = " ".join(lines).lower()
+
+    error_keywords = [
+        "no puedes ingresar", "no se le puede", "no puede ser ascendido",
+        "aún no puedes", "no se encontró", "no está activamente",
+        "no es jefe", "no es integrante", "no tengo permisos",
+        "solo el **dueño**", "solo admins", "no es una banda",
+        "ya está registrado", "ya pertenece", "ya es jefe",
+        "ya alcanzaron", "está llena", "cancelada", "no existe",
+        "no puedo borrar", "no se puede", "formato de fecha inválido",
+        "la cantidad no puede", "los días deben",
+        "el rol de jefe y el de integrante", "no encontró", "no encontro",
+        "no está en el servidor", "no tiene rol de jefe", "no hay rol de",
+        "cooldown de la **misma banda**", "cooldown por haber estado",
+        "cooldown por **desmantelación**",
+    ]
+    warning_keywords = ["confirmación requerida", "aviso:", "⚠️"]
+
+    for kw in error_keywords:
+        if kw in joined:
+            return "error"
+    for kw in warning_keywords:
+        if kw in joined:
+            return "warning"
+
+    success_keywords = [
+        "ha sido asignado", "ahora es el nuevo integrante", "ha sido ascendido",
+        "ha salido", "ya no es jefe", "ha sido desmantelada",
+        "registrado como", "capacidad de", "dueño de", "cerrada",
+        "reactivada", "eliminado", "borrado", "otorgado", "banda **",
+    ]
+    for kw in success_keywords:
+        if kw in joined:
+            return "success"
+
+    return "info"
+
+
+def format_message(*lines: str, kind: str | None = None) -> discord.Embed:
+    """Devuelve un embed formateado con los textos como una descripción bulleteada.
+    `kind` puede ser 'success', 'error', 'warning' o 'info'.
+    Si no se pasa, se detecta automáticamente del contenido."""
+    if not lines:
+        return discord.Embed(description=SEPARATOR, color=COLOR_INFO)
+
+    if kind is None:
+        kind = _detect_message_type(lines)
+
+    color_map = {
+        "success": COLOR_SUCCESS,
+        "error": COLOR_ERROR,
+        "warning": COLOR_WARNING,
+        "info": COLOR_INFO,
+    }
+    color = color_map.get(kind, COLOR_INFO)
+
+    description = "\n".join(f"- {line}" for line in lines) + f"\n{SEPARATOR}"
+    return discord.Embed(description=description, color=color)
 
 
 def split_long_message(text: str, limit: int = 1900) -> list[str]:
@@ -557,16 +620,23 @@ def split_long_message(text: str, limit: int = 1900) -> list[str]:
     return chunks
 
 
-async def send_long(interaction: discord.Interaction, text: str, ephemeral: bool = False):
-    """Envía un mensaje largo dividiéndolo en varios si excede 2000 caracteres."""
-    chunks = split_long_message(text)
-    if not chunks:
+async def send_long(interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False):
+    """Envía un embed largo dividiéndolo en varios si excede el límite de description (4096 chars)."""
+    description = embed.description or ""
+    limit = 4000  # Margen de seguridad frente al límite real de 4096
+    if len(description) <= limit:
+        await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
         return
-    # Primero se responde con el primer chunk
-    await interaction.response.send_message(chunks[0], ephemeral=ephemeral)
-    # Los demás como followups
-    for chunk in chunks[1:]:
-        await interaction.followup.send(chunk, ephemeral=ephemeral)
+
+    chunks = split_long_message(description, limit=limit)
+    first = True
+    for chunk in chunks:
+        chunk_embed = discord.Embed(description=chunk, color=embed.color)
+        if first:
+            await interaction.response.send_message(embed=chunk_embed, ephemeral=ephemeral)
+            first = False
+        else:
+            await interaction.followup.send(embed=chunk_embed, ephemeral=ephemeral)
 
 
 def _format_remaining(delta: timedelta) -> str:
@@ -901,19 +971,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     band_member_role_id = get_band_from_leader(leader)
     if band_member_role_id is None:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"{reactor.mention} El autor del mensaje no tiene rol de **Jefe** de ninguna banda configurada"
         ))
         return
 
     band_role = guild.get_role(band_member_role_id)
     if band_role is None:
-        await channel.send(format_message(f"Rol de banda no encontrado (ID {band_member_role_id})"))
+        await channel.send(embed=format_message(f"Rol de banda no encontrado (ID {band_member_role_id})"))
         return
 
     targets = await get_all_user_mentions(message)
     if not targets:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"{reactor.mention} No se encontró ninguna mención de usuario en el mensaje"
         ))
         return
@@ -931,7 +1001,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if payload.channel_id == REQUEST_CHANNEL_ID:
             # En SOLICITAR: si el usuario ya no está en el servidor, no se le puede dar un rol
             if not isinstance(target, discord.Member):
-                await channel.send(format_message(
+                await channel.send(embed=format_message(
                     f"{target.mention} No se le puede asignar un rango",
                     "Motivo: El usuario no está en el servidor de Discord",
                 ))
@@ -965,7 +1035,7 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
     can_join, error_lines = await check_member_assign(member.id, channel.guild.id, band_role.id, bypass_cooldowns=bypass)
     if not can_join:
         # error_lines[0] es el título, el resto son viñetas
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"{member.mention} {error_lines[0]}",
             *error_lines[1:],
         ))
@@ -978,7 +1048,7 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
     try:
         await member.add_roles(band_role, reason=reason)
     except discord.Forbidden:
-        await channel.send(format_message("No tengo permisos para asignar ese rol"))
+        await channel.send(embed=format_message("No tengo permisos para asignar ese rol"))
         return False
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="member")
@@ -988,7 +1058,7 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
     extra = await get_extra_capacity(channel.guild.id, band_role.id)
     effective_capacity = capacity + extra
     bypass_note = " (Cooldowns saltados)" if bypass else ""
-    await channel.send(format_message(
+    await channel.send(embed=format_message(
         f"{member.mention} Ahora es el nuevo integrante de {band_role.mention}{bypass_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
@@ -1000,17 +1070,17 @@ async def handle_assign_member(channel, member, band_role, reactor, leader, bypa
 async def handle_assign_leader(channel, member, band_role, reactor, leader) -> bool:
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id is None:
-        await channel.send(format_message(f"{band_role.mention} no tiene **dueño** configurado"))
+        await channel.send(embed=format_message(f"{band_role.mention} no tiene **dueño** configurado"))
         return False
     if leader.id != owner_id:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede solicitar nuevos Jefes"
         ))
         return False
 
     can_join, error_lines = await check_leader_assign(member.id, channel.guild.id, band_role.id)
     if not can_join:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"{member.mention} {error_lines[0]}",
             *error_lines[1:],
         ))
@@ -1018,11 +1088,11 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader) -> b
 
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(band_role.id)
     if leader_role_id is None:
-        await channel.send(format_message(f"No hay rol de **Jefe** configurado para {band_role.mention}"))
+        await channel.send(embed=format_message(f"No hay rol de **Jefe** configurado para {band_role.mention}"))
         return False
     leader_role = channel.guild.get_role(leader_role_id)
     if leader_role is None:
-        await channel.send(format_message(f"Rol de **Jefe** (ID {leader_role_id}) no encontrado"))
+        await channel.send(embed=format_message(f"Rol de **Jefe** (ID {leader_role_id}) no encontrado"))
         return False
 
     # Cerrar la membresía de tipo 'member' (si existe) en BD
@@ -1037,7 +1107,7 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader) -> b
         if band_role not in member.roles:
             await member.add_roles(band_role, reason="Rol de miembro asegurado al ascender a Jefe")
     except discord.Forbidden:
-        await channel.send(format_message("No tengo permisos para gestionar los roles"))
+        await channel.send(embed=format_message("No tengo permisos para gestionar los roles"))
         return False
 
     await open_membership(member.id, channel.guild.id, band_role.id, role_kind="leader")
@@ -1046,7 +1116,7 @@ async def handle_assign_leader(channel, member, band_role, reactor, leader) -> b
     capacity = BAND_CAPACITY.get(band_role.id, 0)
     extra = await get_extra_capacity(channel.guild.id, band_role.id)
     effective_capacity = capacity + extra
-    await channel.send(format_message(
+    await channel.send(embed=format_message(
         f"{member.mention} Ha sido ascendido a Jefe de {band_role.mention}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
@@ -1061,7 +1131,7 @@ async def handle_remove_full(channel, member, band_role, reactor, leader) -> boo
     Funciona incluso si el usuario ya salió del servidor (solo actualiza la BD)."""
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id and member.id == owner_id:
-        await channel.send(format_message(f"No se le puede quitar el rango al **dueño** de la banda ({member.mention})"))
+        await channel.send(embed=format_message(f"No se le puede quitar el rango al **dueño** de la banda ({member.mention})"))
         return False
 
     active_member = await get_active_membership(member.id, channel.guild.id, role_kind="member")
@@ -1071,12 +1141,12 @@ async def handle_remove_full(channel, member, band_role, reactor, leader) -> boo
     is_leader_here = active_leader and active_leader["band_role_id"] == band_role.id
 
     if not is_member_here and not is_leader_here:
-        await channel.send(format_message(f"{member.mention} no está activamente en {band_role.mention}"))
+        await channel.send(embed=format_message(f"{member.mention} no está activamente en {band_role.mention}"))
         return False
 
     # Si es jefe, solo el dueño puede expulsarlo
     if is_leader_here and leader.id != owner_id:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede expulsar a un **Jefe**"
         ))
         return False
@@ -1098,7 +1168,7 @@ async def handle_remove_full(channel, member, band_role, reactor, leader) -> boo
             try:
                 await member.remove_roles(*roles_to_remove, reason=f"Expulsado por {reactor} (jefe: {leader})")
             except discord.Forbidden:
-                await channel.send(format_message("No tengo permisos para remover los roles"))
+                await channel.send(embed=format_message("No tengo permisos para remover los roles"))
                 return False
     else:
         left_server_note = " (el usuario ya no está en el servidor)"
@@ -1113,7 +1183,7 @@ async def handle_remove_full(channel, member, band_role, reactor, leader) -> boo
     capacity = BAND_CAPACITY.get(band_role.id, 0)
     extra = await get_extra_capacity(channel.guild.id, band_role.id)
     effective_capacity = capacity + extra
-    await channel.send(format_message(
+    await channel.send(embed=format_message(
         f"{member.mention} Ha salido de {band_role.mention}{left_server_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
@@ -1127,21 +1197,21 @@ async def handle_demote(channel, member, band_role, reactor, leader) -> bool:
     NO consume cupo semanal porque es un cambio de rol, no una entrada nueva."""
     owner_id = BAND_OWNER.get(band_role.id)
     if owner_id is None:
-        await channel.send(format_message(f"{band_role.mention} no tiene **dueño** configurado"))
+        await channel.send(embed=format_message(f"{band_role.mention} no tiene **dueño** configurado"))
         return False
     if leader.id != owner_id:
-        await channel.send(format_message(
+        await channel.send(embed=format_message(
             f"Solo el **dueño** de {band_role.mention} (<@{owner_id}>) puede degradar a un **Jefe**"
         ))
         return False
 
     if member.id == owner_id:
-        await channel.send(format_message(f"No se le puede degradar al **dueño** ({member.mention})"))
+        await channel.send(embed=format_message(f"No se le puede degradar al **dueño** ({member.mention})"))
         return False
 
     active = await get_active_membership(member.id, channel.guild.id, role_kind="leader")
     if not active or active["band_role_id"] != band_role.id:
-        await channel.send(format_message(f"{member.mention} no es **Jefe** activo de {band_role.mention}"))
+        await channel.send(embed=format_message(f"{member.mention} no es **Jefe** activo de {band_role.mention}"))
         return False
 
     leader_role_id = MEMBER_TO_LEADER_ROLE.get(band_role.id)
@@ -1159,7 +1229,7 @@ async def handle_demote(channel, member, band_role, reactor, leader) -> bool:
             if band_role not in member.roles:
                 await member.add_roles(band_role, reason="Rol de miembro asegurado al degradar")
         except discord.Forbidden:
-            await channel.send(format_message("No tengo permisos para gestionar los roles"))
+            await channel.send(embed=format_message("No tengo permisos para gestionar los roles"))
             return False
     else:
         left_server_note = " (el usuario ya no está en el servidor)"
@@ -1189,7 +1259,7 @@ async def handle_demote(channel, member, band_role, reactor, leader) -> bool:
     capacity = BAND_CAPACITY.get(band_role.id, 0)
     extra = await get_extra_capacity(channel.guild.id, band_role.id)
     effective_capacity = capacity + extra
-    await channel.send(format_message(
+    await channel.send(embed=format_message(
         f"{member.mention} Ya no es Jefe de {band_role.mention}, ha sido degradado a integrante{left_server_note}",
         f"Solicitado por {leader.mention}",
         f"Confirmado por {reactor.mention}",
@@ -1237,14 +1307,14 @@ async def estado_slash(interaction: discord.Interaction, usuario: discord.Member
             f"({disband_cd['reason']})"
         )
 
-    await interaction.response.send_message(format_message(*lines))
+    await interaction.response.send_message(embed=format_message(*lines))
 
 
 @bot.tree.command(name="banda", description="Muestra cupo, jefes y dueño de una banda")
 @app_commands.describe(banda="La banda a consultar")
 async def banda_slash(interaction: discord.Interaction, banda: discord.Role):
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
     weekly = await count_weekly_member_assignments(interaction.guild.id, banda.id)
     leaders = await count_active_leaders(interaction.guild.id, banda.id)
@@ -1257,7 +1327,7 @@ async def banda_slash(interaction: discord.Interaction, banda: discord.Role):
     capacity_line = f"Personas activas: {total}/{effective_capacity} integrantes"
     if extra > 0:
         capacity_line += f" (base {capacity} + {extra} extra)"
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"**{banda.name}**",
         owner_line,
         capacity_line,
@@ -1279,18 +1349,18 @@ async def registrar_miembro_slash(
     dias_atras: int = 0,
 ):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     active = await get_active_membership(usuario.id, interaction.guild.id, role_kind="member")
     if active and active["band_role_id"] == banda.id:
-        await interaction.response.send_message(format_message(f"{usuario.mention} ya está registrado como **miembro** de {banda.mention}"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{usuario.mention} ya está registrado como **miembro** de {banda.mention}"), ephemeral=True)
         return
     if active:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"{usuario.mention} ya está en otra banda (<@&{active['band_role_id']}>)"
         ), ephemeral=True)
         return
@@ -1306,14 +1376,14 @@ async def registrar_miembro_slash(
         try:
             await usuario.add_roles(banda, reason=f"Registrado manualmente por {interaction.user}")
         except discord.Forbidden:
-            await interaction.response.send_message(format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
             return
 
     total = await count_active_total_in_band(interaction.guild.id, banda.id)
     capacity = BAND_CAPACITY.get(banda.id, 0)
     extra = await get_extra_capacity(interaction.guild.id, banda.id)
     effective_capacity = capacity + extra
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"{usuario.mention} registrado como **miembro** de {banda.mention}",
         f"Fecha de entrada: hace {dias_atras} días",
         f"Confirmado por: {interaction.user.mention}",
@@ -1334,18 +1404,18 @@ async def registrar_jefe_slash(
     dias_atras: int = 0,
 ):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     active = await get_active_membership(usuario.id, interaction.guild.id, role_kind="leader")
     if active and active["band_role_id"] == banda.id:
-        await interaction.response.send_message(format_message(f"{usuario.mention} ya es **Jefe** de {banda.mention}"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{usuario.mention} ya es **Jefe** de {banda.mention}"), ephemeral=True)
         return
     if active:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"{usuario.mention} ya es **Jefe** de otra banda (<@&{active['band_role_id']}>)"
         ), ephemeral=True)
         return
@@ -1363,7 +1433,7 @@ async def registrar_jefe_slash(
         try:
             await usuario.add_roles(leader_role, reason=f"Registrado manualmente por {interaction.user}")
         except discord.Forbidden:
-            await interaction.response.send_message(format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message("Registrado en BD pero no tengo permisos para asignar el rol"), ephemeral=True)
             return
 
     leader_count = await count_active_leaders(interaction.guild.id, banda.id)
@@ -1371,7 +1441,7 @@ async def registrar_jefe_slash(
     capacity = BAND_CAPACITY.get(banda.id, 0)
     extra = await get_extra_capacity(interaction.guild.id, banda.id)
     effective_capacity = capacity + extra
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"{usuario.mention} registrado como **Jefe** de {banda.mention}",
         f"Fecha de entrada: hace {dias_atras} días",
         f"Confirmado por: {interaction.user.mention}",
@@ -1383,10 +1453,10 @@ async def registrar_jefe_slash(
 @app_commands.describe(banda="La banda a desmantelar")
 async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.Role):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     # Confirmación con un botón
@@ -1413,7 +1483,7 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
             await btn_interaction.response.defer()
 
     view = ConfirmView()
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         "**CONFIRMACIÓN REQUERIDA**",
         f"Vas a desmantelar **{banda.name}**:",
         "Expulsa a TODOS los miembros y Jefes (incluido el dueño)",
@@ -1426,7 +1496,7 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
 
     await view.wait()
     if not view.confirmed:
-        await interaction.followup.send(format_message("Desmantelación cancelada"))
+        await interaction.followup.send(embed=format_message("Desmantelación cancelada"))
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1486,7 +1556,7 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
     ]
     if role_errors:
         msg_lines.append(f"No pude quitar el rol a {role_errors} usuarios (problema de permisos)")
-    await interaction.followup.send(format_message(*msg_lines))
+    await interaction.followup.send(embed=format_message(*msg_lines))
 
 
 # ===== Comandos de cupos extra =====
@@ -1498,15 +1568,15 @@ async def desmantelacion_slash(interaction: discord.Interaction, banda: discord.
 )
 async def degradar_slash(interaction: discord.Interaction, usuario: discord.Member, banda: discord.Role):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     active = await get_active_membership(usuario.id, interaction.guild.id, role_kind="leader")
     if not active or active["band_role_id"] != banda.id:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"{usuario.mention} no es **Jefe** activo de {banda.mention}",
         ), ephemeral=True)
         return
@@ -1521,7 +1591,7 @@ async def degradar_slash(interaction: discord.Interaction, usuario: discord.Memb
         if banda not in usuario.roles:
             await usuario.add_roles(banda, reason=f"Rol de miembro asegurado al degradar por staff {interaction.user}")
     except discord.Forbidden:
-        await interaction.response.send_message(format_message("No tengo permisos para gestionar los roles"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("No tengo permisos para gestionar los roles"), ephemeral=True)
         return
 
     # Cerrar membresía leader
@@ -1544,7 +1614,7 @@ async def degradar_slash(interaction: discord.Interaction, usuario: discord.Memb
     capacity = BAND_CAPACITY.get(banda.id, 0)
     extra = await get_extra_capacity(interaction.guild.id, banda.id)
     effective_capacity = capacity + extra
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"{usuario.mention} Ya no es Jefe de {banda.mention}, ha sido degradado a integrante",
         f"Confirmado por {interaction.user.mention} (acción de staff)",
         f"Estado actual: Jefes activos {leader_count}/{MAX_LEADERS_PER_BAND} · Integrantes {total}/{effective_capacity}",
@@ -1564,10 +1634,10 @@ async def quitar_rango_slash(
     sin_cooldown: bool = False,
 ):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     active_member = await get_active_membership(usuario.id, interaction.guild.id, role_kind="member")
@@ -1576,7 +1646,7 @@ async def quitar_rango_slash(
     is_leader_here = active_leader and active_leader["band_role_id"] == banda.id
 
     if not is_member_here and not is_leader_here:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"{usuario.mention} no está activamente en {banda.mention}",
         ), ephemeral=True)
         return
@@ -1593,7 +1663,7 @@ async def quitar_rango_slash(
         try:
             await usuario.remove_roles(*roles_to_remove, reason=f"Expulsado por staff {interaction.user}")
         except discord.Forbidden:
-            await interaction.response.send_message(format_message("No tengo permisos para remover los roles"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message("No tengo permisos para remover los roles"), ephemeral=True)
             return
 
     # Si pide sin_cooldown, en vez de cerrar normalmente, borramos las filas para que no genere cooldown
@@ -1614,7 +1684,7 @@ async def quitar_rango_slash(
     extra = await get_extra_capacity(interaction.guild.id, banda.id)
     effective_capacity = capacity + extra
     cooldown_line = "Sin cooldown (acción de staff)" if sin_cooldown else "Se activó el cooldown"
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"{usuario.mention} Ha salido de {banda.mention}",
         f"Confirmado por {interaction.user.mention} (acción de staff)",
         f"Estado actual: {cooldown_line} · Integrantes {total}/{effective_capacity}",
@@ -1636,16 +1706,16 @@ async def cupo_extra_slash(
     nota: str | None = None,
 ):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
     if cantidad == 0:
-        await interaction.response.send_message(format_message("La cantidad no puede ser 0"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("La cantidad no puede ser 0"), ephemeral=True)
         return
     if dias is not None and dias <= 0:
-        await interaction.response.send_message(format_message("Los días deben ser mayores a 0"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Los días deben ser mayores a 0"), ephemeral=True)
         return
 
     extra_id = await add_extra_capacity(
@@ -1667,19 +1737,19 @@ async def cupo_extra_slash(
     ]
     if nota:
         lines.append(f"Nota: {nota}")
-    await interaction.response.send_message(format_message(*lines))
+    await interaction.response.send_message(embed=format_message(*lines))
 
 
 @bot.tree.command(name="cupos_extras_lista", description="Lista los cupos extras activos de una banda")
 @app_commands.describe(banda="La banda a consultar")
 async def cupos_extras_lista_slash(interaction: discord.Interaction, banda: discord.Role):
     if banda.id not in MEMBER_TO_LEADER_ROLE:
-        await interaction.response.send_message(format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda configurada"), ephemeral=True)
         return
 
     rows = await list_extra_capacity(interaction.guild.id, banda.id)
     if not rows:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"**{banda.name}** no tiene cupos extras activos",
         ))
         return
@@ -1706,17 +1776,17 @@ async def cupos_extras_lista_slash(interaction: discord.Interaction, banda: disc
 @app_commands.describe(extra_id="ID del cupo extra (lo ves con /cupos_extras_lista)")
 async def cupo_extra_quitar_slash(interaction: discord.Interaction, extra_id: int):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
 
     deleted = await remove_extra_capacity(extra_id, interaction.guild.id)
     if not deleted:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"No se encontró ningún cupo extra con ID `{extra_id}`",
         ), ephemeral=True)
         return
 
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"Cupo extra ID `{extra_id}` eliminado",
         f"Eliminado por: {interaction.user.mention}",
     ))
@@ -1742,13 +1812,13 @@ async def crear_banda_slash(
     dueno: discord.Member,
 ):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if capacidad <= 0:
-        await interaction.response.send_message(format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
         return
     if rol_jefe.id == rol_miembro.id:
-        await interaction.response.send_message(format_message("El rol de Jefe y el de integrante deben ser distintos"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("El rol de Jefe y el de integrante deben ser distintos"), ephemeral=True)
         return
 
     # Verificar que los roles no estén siendo usados por otra banda activa
@@ -1762,7 +1832,7 @@ async def crear_banda_slash(
             interaction.guild.id, rol_jefe.id, rol_miembro.id,
         )
         if conflict:
-            await interaction.response.send_message(format_message(
+            await interaction.response.send_message(embed=format_message(
                 f"Uno de los roles ya está siendo usado por la banda **{conflict['name']}**",
                 "Si vas a reutilizar estos roles, primero cierra la banda anterior con /cerrar_banda",
                 "y borra su historial con /borrar_historial_banda",
@@ -1795,25 +1865,52 @@ async def crear_banda_slash(
 
     await load_bands_from_db()
 
+    # Registrar automáticamente al dueño como Jefe en la BD
+    # y asignarle los roles (Jefe + integrante) en Discord
+    now = datetime.now(timezone.utc)
+    async with bot.db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO band_membership (guild_id, user_id, band_role_id, role_kind, joined_at)
+            VALUES ($1, $2, $3, 'leader', $4)
+            """,
+            interaction.guild.id, dueno.id, rol_miembro.id, now,
+        )
+
+    role_assign_note = None
+    try:
+        roles_to_add = []
+        if rol_jefe not in dueno.roles:
+            roles_to_add.append(rol_jefe)
+        if rol_miembro not in dueno.roles:
+            roles_to_add.append(rol_miembro)
+        if roles_to_add:
+            await dueno.add_roles(*roles_to_add, reason=f"Dueño registrado al crear banda por {interaction.user}")
+    except discord.Forbidden:
+        role_assign_note = "No pude asignarle los roles al dueño (falta de permisos). Asígnalos manualmente"
+
     lines = [
         f"Banda **{nombre}** creada (ID: {new_id})",
         f"Rol Jefe: {rol_jefe.mention} · Rol integrante: {rol_miembro.mention}",
         f"Capacidad: {capacidad} · Dueño: {dueno.mention}",
+        f"Dueño registrado automáticamente como **Jefe**",
         f"Creado por: {interaction.user.mention}",
     ]
+    if role_assign_note:
+        lines.append(role_assign_note)
     if old_history and old_history > 0:
         lines.append(f"⚠️ Aviso: el rol de integrante tiene {old_history} registros de historial de una banda anterior. Usa /borrar_historial_banda si quieres empezar limpio")
-    await interaction.response.send_message(format_message(*lines))
+    await interaction.response.send_message(embed=format_message(*lines))
 
 
 @bot.tree.command(name="editar_capacidad", description="[Staff] Cambia la capacidad base de una banda")
 @app_commands.describe(banda="Banda a editar", nueva_capacidad="Nueva capacidad base")
 async def editar_capacidad_slash(interaction: discord.Interaction, banda: discord.Role, nueva_capacidad: int):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
     if nueva_capacidad <= 0:
-        await interaction.response.send_message(format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("La capacidad debe ser mayor a 0"), ephemeral=True)
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1822,13 +1919,13 @@ async def editar_capacidad_slash(interaction: discord.Interaction, banda: discor
             interaction.guild.id, banda.id,
         )
         if not row:
-            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
             return
         old_capacity = row["capacity"]
         await conn.execute("UPDATE band_config SET capacity = $1 WHERE id = $2", nueva_capacidad, row["id"])
 
     await load_bands_from_db()
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"Capacidad de **{row['name']}** actualizada",
         f"Antes: {old_capacity} · Ahora: {nueva_capacidad}",
         f"Confirmado por: {interaction.user.mention}",
@@ -1839,7 +1936,7 @@ async def editar_capacidad_slash(interaction: discord.Interaction, banda: discor
 @app_commands.describe(banda="Banda a editar", nuevo_dueno="Nuevo usuario dueño")
 async def editar_dueno_slash(interaction: discord.Interaction, banda: discord.Role, nuevo_dueno: discord.Member):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1848,14 +1945,14 @@ async def editar_dueno_slash(interaction: discord.Interaction, banda: discord.Ro
             interaction.guild.id, banda.id,
         )
         if not row:
-            await interaction.response.send_message(format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message(f"{banda.mention} no es una banda activa"), ephemeral=True)
             return
         old_owner_id = row["owner_id"]
         await conn.execute("UPDATE band_config SET owner_id = $1 WHERE id = $2", nuevo_dueno.id, row["id"])
 
     await load_bands_from_db()
     old_owner_str = f"<@{old_owner_id}>" if old_owner_id else "*sin dueño*"
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"Dueño de **{row['name']}** actualizado",
         f"Antes: {old_owner_str} · Ahora: {nuevo_dueno.mention}",
         f"Confirmado por: {interaction.user.mention}",
@@ -1866,7 +1963,7 @@ async def editar_dueno_slash(interaction: discord.Interaction, banda: discord.Ro
 @app_commands.describe(banda_id="ID de la banda (usa /lista_bandas para verlo)")
 async def reactivar_banda_slash(interaction: discord.Interaction, banda_id: int):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1875,10 +1972,10 @@ async def reactivar_banda_slash(interaction: discord.Interaction, banda_id: int)
             interaction.guild.id, banda_id,
         )
         if not row:
-            await interaction.response.send_message(format_message(f"No existe ninguna banda con ID `{banda_id}`"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message(f"No existe ninguna banda con ID `{banda_id}`"), ephemeral=True)
             return
         if row["active"]:
-            await interaction.response.send_message(format_message(f"La banda **{row['name']}** ya está activa"), ephemeral=True)
+            await interaction.response.send_message(embed=format_message(f"La banda **{row['name']}** ya está activa"), ephemeral=True)
             return
         # Verificar que los roles no estén siendo usados por otra activa
         conflict = await conn.fetchrow(
@@ -1890,14 +1987,14 @@ async def reactivar_banda_slash(interaction: discord.Interaction, banda_id: int)
             interaction.guild.id, row["leader_role_id"], row["member_role_id"],
         )
         if conflict:
-            await interaction.response.send_message(format_message(
+            await interaction.response.send_message(embed=format_message(
                 f"No se puede reactivar: los roles están en uso por la banda **{conflict['name']}**",
             ), ephemeral=True)
             return
         await conn.execute("UPDATE band_config SET active = TRUE WHERE id = $1", banda_id)
 
     await load_bands_from_db()
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"Banda **{row['name']}** reactivada",
         f"Confirmado por: {interaction.user.mention}",
     ))
@@ -1907,7 +2004,7 @@ async def reactivar_banda_slash(interaction: discord.Interaction, banda_id: int)
 @app_commands.describe(rol_miembro="Rol de integrante cuyo historial quieres borrar")
 async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_miembro: discord.Role):
     if not is_staff(interaction.user):
-        await interaction.response.send_message(format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
+        await interaction.response.send_message(embed=format_message("Solo admins/staff pueden usar este comando"), ephemeral=True)
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1917,7 +2014,7 @@ async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_mie
             interaction.guild.id, rol_miembro.id,
         )
         if active_band:
-            await interaction.response.send_message(format_message(
+            await interaction.response.send_message(embed=format_message(
                 f"No puedo borrar el historial: {rol_miembro.mention} está en uso por la banda activa **{active_band['name']}**",
                 "Primero cierra la banda con /cerrar_banda",
             ), ephemeral=True)
@@ -1928,7 +2025,7 @@ async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_mie
         )
 
     if total == 0:
-        await interaction.response.send_message(format_message(
+        await interaction.response.send_message(embed=format_message(
             f"No hay historial que borrar para {rol_miembro.mention}",
         ), ephemeral=True)
         return
@@ -1957,7 +2054,7 @@ async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_mie
             await btn_interaction.response.defer()
 
     view = ConfirmView()
-    await interaction.response.send_message(format_message(
+    await interaction.response.send_message(embed=format_message(
         f"**CONFIRMACIÓN REQUERIDA**",
         f"Vas a borrar **{total}** registros de historial asociados a {rol_miembro.mention}",
         "Esta acción NO se puede deshacer",
@@ -1966,7 +2063,7 @@ async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_mie
 
     await view.wait()
     if not view.confirmed:
-        await interaction.followup.send(format_message("Operación cancelada"))
+        await interaction.followup.send(embed=format_message("Operación cancelada"))
         return
 
     async with bot.db_pool.acquire() as conn:
@@ -1975,7 +2072,7 @@ async def borrar_historial_banda_slash(interaction: discord.Interaction, rol_mie
             interaction.guild.id, rol_miembro.id,
         )
 
-    await interaction.followup.send(format_message(
+    await interaction.followup.send(embed=format_message(
         f"Historial borrado ({total} registros eliminados)",
         f"Rol: {rol_miembro.mention}",
         f"Confirmado por: {interaction.user.mention}",
@@ -1991,7 +2088,7 @@ async def lista_bandas_slash(interaction: discord.Interaction):
         )
 
     if not rows:
-        await interaction.response.send_message(format_message("No hay bandas configuradas"))
+        await interaction.response.send_message(embed=format_message("No hay bandas configuradas"))
         return
 
     active_lines = ["**Bandas activas:**"]
